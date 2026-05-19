@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using PullSight.Api.Data;
 using PullSight.Api.Services.GitHub;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +27,17 @@ var allowedOrigins = configuredOrigins
     .ToArray();
 
 builder.Services.AddControllers();
+builder.Services.AddDbContext<PullSightDbContext>(options =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+    }
+
+    options.UseNpgsql(ToNpgsqlConnectionString(connectionString));
+});
 builder.Services.Configure<GitHubOAuthOptions>(builder.Configuration.GetSection("GitHub"));
 builder.Services.AddHttpClient<GitHubOAuthService>();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -75,6 +89,12 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<PullSightDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -90,3 +110,30 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static string ToNpgsqlConnectionString(string connectionString)
+{
+    if (!connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase)
+        && !connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase))
+    {
+        return connectionString;
+    }
+
+    var uri = new Uri(connectionString);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        Username = Uri.UnescapeDataString(userInfo[0]),
+        SslMode = SslMode.Require,
+    };
+
+    if (userInfo.Length > 1)
+    {
+        builder.Password = Uri.UnescapeDataString(userInfo[1]);
+    }
+
+    return builder.ConnectionString;
+}

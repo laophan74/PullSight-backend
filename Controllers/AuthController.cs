@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using PullSight.Api.Data;
+using PullSight.Api.Data.Entities;
 using Microsoft.Extensions.Options;
 using PullSight.Api.Contracts.Auth;
 using PullSight.Api.Services.GitHub;
@@ -15,6 +18,7 @@ namespace PullSight.Api.Controllers;
 [Route("api/auth")]
 public sealed class AuthController(
     GitHubOAuthService gitHubOAuthService,
+    PullSightDbContext dbContext,
     IDataProtectionProvider dataProtectionProvider,
     IConfiguration configuration,
     IOptions<GitHubOAuthOptions> gitHubOptions) : ControllerBase
@@ -64,6 +68,7 @@ public sealed class AuthController(
         var token = await gitHubOAuthService.ExchangeCodeAsync(code, redirectUri, cancellationToken);
         var profile = await gitHubOAuthService.GetUserAsync(token.AccessToken, cancellationToken);
         var email = profile.Email ?? await gitHubOAuthService.GetPrimaryEmailAsync(token.AccessToken, cancellationToken);
+        await UpsertGitHubUserAsync(profile, email, token.Scope, cancellationToken);
 
         var claims = new List<Claim>
         {
@@ -172,6 +177,56 @@ public sealed class AuthController(
                 && origin.Port == requestedUri.Port);
 
         return allowed ? requestedUri.ToString() : fallback;
+    }
+
+    private async Task UpsertGitHubUserAsync(
+        GitHubUserProfile profile,
+        string? email,
+        string? scopes,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var user = await dbContext.Users
+            .Include(existingUser => existingUser.GitHubConnection)
+            .FirstOrDefaultAsync(
+                existingUser => existingUser.GitHubUserId == profile.Id,
+                cancellationToken);
+
+        if (user is null)
+        {
+            user = new AppUser
+            {
+                GitHubUserId = profile.Id,
+                Login = profile.Login,
+                CreatedAt = now,
+            };
+            dbContext.Users.Add(user);
+        }
+
+        user.Login = profile.Login;
+        user.Name = profile.Name;
+        user.Email = email;
+        user.AvatarUrl = profile.AvatarUrl;
+        user.ProfileUrl = profile.HtmlUrl;
+        user.UpdatedAt = now;
+
+        if (user.GitHubConnection is null)
+        {
+            user.GitHubConnection = new GitHubConnection
+            {
+                UserId = user.Id,
+                GitHubUserId = profile.Id,
+                Login = profile.Login,
+                ConnectedAt = now,
+            };
+        }
+
+        user.GitHubConnection.GitHubUserId = profile.Id;
+        user.GitHubConnection.Login = profile.Login;
+        user.GitHubConnection.Scopes = scopes;
+        user.GitHubConnection.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private sealed record GitHubOAuthState(string ReturnUrl, DateTimeOffset CreatedAt);
