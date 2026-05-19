@@ -27,10 +27,36 @@ Demo review endpoint:
 POST http://localhost:5200/api/reviews/demo
 ```
 
+GitHub auth endpoints:
+
+```text
+GET  http://localhost:5200/api/auth/github/login
+GET  http://localhost:5200/api/auth/github/callback
+GET  http://localhost:5200/api/auth/me
+POST http://localhost:5200/api/auth/logout
+```
+
 Production health check:
 
 ```text
 GET https://pullsight-backend.onrender.com/api/health
+```
+
+## GitHub OAuth
+
+Create a GitHub OAuth App with these callback URLs:
+
+```text
+Local:      http://localhost:5200/api/auth/github/callback
+Production: https://pullsight-backend.onrender.com/api/auth/github/callback
+```
+
+For local development, use user secrets or environment variables:
+
+```bash
+dotnet user-secrets set "GitHub:ClientId" "your-client-id"
+dotnet user-secrets set "GitHub:ClientSecret" "your-client-secret"
+dotnet user-secrets set "App:FrontendUrl" "http://127.0.0.1:5173"
 ```
 
 ## Production Environment Variables
@@ -39,10 +65,12 @@ Set these on the hosting platform:
 
 ```text
 ASPNETCORE_ENVIRONMENT=Production
-Cors__AllowedOrigins__0=https://your-frontend-domain.vercel.app
+App__FrontendUrl=https://your-frontend-domain.vercel.app
+GitHub__ClientId=your-client-id
+GitHub__ClientSecret=your-client-secret
 ```
 
-Add more origins by incrementing the index:
+`App__FrontendUrl` is also included in the backend CORS allow-list, so one frontend domain only needs that one variable. Add extra allowed origins only when you intentionally support additional frontend domains:
 
 ```text
 Cors__AllowedOrigins__1=https://your-custom-domain.com
