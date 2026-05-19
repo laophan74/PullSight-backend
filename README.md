@@ -27,7 +27,6 @@ Set these on the hosting platform:
 
 ```text
 ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://+:8080
 Cors__AllowedOrigins__0=https://your-frontend-domain.vercel.app
 ```
 
@@ -46,4 +45,4 @@ docker run --rm -p 8080:8080 -e Cors__AllowedOrigins__0=http://localhost:5173 pu
 
 ## Deploy Notes
 
-Use Docker deployment on Koyeb or Render. The container listens on port `8080`, and the health check path is `/api/health`.
+Use Docker deployment on Koyeb or Render. The app reads the platform-provided `PORT` environment variable and falls back to `8080` locally. The health check path is `/api/health`.
