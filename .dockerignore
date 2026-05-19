@@ -1,0 +1,10 @@
+bin/
+obj/
+publish*/
+.git/
+.vs/
+.vscode/
+Dockerfile
+*.user
+*.rsuser
+*.suo

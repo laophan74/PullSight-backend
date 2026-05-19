@@ -1,16 +1,23 @@
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()
+    ?? [];
 
 builder.Services.AddControllers();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("FrontendDev", policy =>
+    options.AddPolicy("Frontend", policy =>
     {
-        policy
-            .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+        if (allowedOrigins.Length > 0)
+        {
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
     });
 });
 builder.Services.AddScoped<PullSight.Api.Services.ReviewAnalysis.ICodeReviewAnalyzer, PullSight.Api.Services.ReviewAnalysis.RuleBasedCodeReviewAnalyzer>();
@@ -25,9 +32,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
-
-app.UseCors("FrontendDev");
+app.UseCors("Frontend");
 
 app.UseAuthorization();
 
