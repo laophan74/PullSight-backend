@@ -6,6 +6,12 @@ Backend-specific Codex context for PullSight.
 
 This repository contains the ASP.NET Core Web API backend for PullSight. It should remain deployable as a standalone backend repo.
 
+Production backend URL:
+
+```text
+https://pullsight-backend.onrender.com
+```
+
 ## Standards
 
 - Use ASP.NET Core Web API.
@@ -29,6 +35,13 @@ Local URLs:
 ```text
 http://localhost:5200/api/health
 POST http://localhost:5200/api/reviews/demo
+```
+
+Production URLs:
+
+```text
+https://pullsight-backend.onrender.com/api/health
+POST https://pullsight-backend.onrender.com/api/reviews/demo
 ```
 
 ## Related Docs

@@ -2,6 +2,12 @@
 
 ASP.NET Core Web API for PullSight.
 
+Production URL:
+
+```text
+https://pullsight-backend.onrender.com
+```
+
 ## Local Development
 
 ```bash
@@ -19,6 +25,12 @@ Demo review endpoint:
 
 ```text
 POST http://localhost:5200/api/reviews/demo
+```
+
+Production health check:
+
+```text
+GET https://pullsight-backend.onrender.com/api/health
 ```
 
 ## Production Environment Variables
@@ -46,3 +58,9 @@ docker run --rm -p 8080:8080 -e Cors__AllowedOrigins__0=http://localhost:5173 pu
 ## Deploy Notes
 
 Use Docker deployment on Koyeb or Render. The app reads the platform-provided `PORT` environment variable and falls back to `8080` locally. The health check path is `/api/health`.
+
+Current Render deployment:
+
+```text
+https://pullsight-backend.onrender.com
+```
