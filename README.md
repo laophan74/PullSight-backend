@@ -105,6 +105,7 @@ ASPNETCORE_ENVIRONMENT=Production
 App__FrontendUrl=https://pull-sight.vercel.app
 GitHub__ClientId=your-client-id
 GitHub__ClientSecret=your-client-secret
+GitHub__CallbackUrl=https://pullsight-backend.onrender.com/api/auth/github/callback
 ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
 Database__MigrateOnStartup=false
 ```

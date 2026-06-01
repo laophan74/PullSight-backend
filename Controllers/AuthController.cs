@@ -148,7 +148,13 @@ public sealed class AuthController(
 
     private string BuildCallbackUri()
     {
-        var callbackPath = gitHubOptions.Value.CallbackPath;
+        var options = gitHubOptions.Value;
+        if (!string.IsNullOrWhiteSpace(options.CallbackUrl))
+        {
+            return options.CallbackUrl;
+        }
+
+        var callbackPath = options.CallbackPath;
 
         return $"{Request.Scheme}://{Request.Host}{Request.PathBase}{callbackPath}";
     }
