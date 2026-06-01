@@ -114,6 +114,7 @@ GitHub__ClientSecret=your-client-secret
 GitHub__CallbackUrl=https://pullsight-backend.onrender.com/api/auth/github/callback
 ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
 Database__MigrateOnStartup=false
+Auth__PersistenceTimeoutSeconds=2
 ```
 
 `App__FrontendUrl` is also included in the backend CORS allow-list, so one frontend domain only needs that one variable. Add extra allowed origins only when you intentionally support additional frontend domains:

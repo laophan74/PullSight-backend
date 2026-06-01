@@ -68,7 +68,7 @@ public sealed class AuthController(
         var redirectUri = BuildCallbackUri();
         var token = await gitHubOAuthService.ExchangeCodeAsync(code, redirectUri, cancellationToken);
         var profile = await gitHubOAuthService.GetUserAsync(token.AccessToken, cancellationToken);
-        var email = profile.Email ?? await gitHubOAuthService.GetPrimaryEmailAsync(token.AccessToken, cancellationToken);
+        var email = profile.Email;
         await TryUpsertGitHubUserAsync(profile, email, token.Scope, cancellationToken);
 
         var claims = new List<Claim>
@@ -192,9 +192,19 @@ public sealed class AuthController(
         string? scopes,
         CancellationToken cancellationToken)
     {
+        var timeoutSeconds = Math.Clamp(configuration.GetValue("Auth:PersistenceTimeoutSeconds", 2), 1, 10);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
         try
         {
-            await UpsertGitHubUserAsync(profile, email, scopes, cancellationToken);
+            await UpsertGitHubUserAsync(profile, email, scopes, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "Timed out while persisting GitHub login for user {GitHubLogin}. Continuing with cookie sign-in.",
+                profile.Login);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
