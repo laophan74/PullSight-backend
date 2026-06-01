@@ -89,10 +89,15 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+if (builder.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
 {
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseMigration");
     var dbContext = scope.ServiceProvider.GetRequiredService<PullSightDbContext>();
+
+    logger.LogInformation("Applying pending EF Core migrations.");
     await dbContext.Database.MigrateAsync();
+    logger.LogInformation("EF Core migrations applied.");
 }
 
 // Configure the HTTP request pipeline.

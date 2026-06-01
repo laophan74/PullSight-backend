@@ -79,6 +79,8 @@ ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
 
 Supabase URI-style strings like `postgresql://...` are supported; the backend normalizes them for Npgsql in `Program.cs`.
 
+If Render can deploy but `GET /api/health/db` fails, use the Supabase pooler connection string from the Supabase dashboard instead of the direct database host. The Render environment variable name stays the same: `ConnectionStrings__DefaultConnection`.
+
 Database schema is managed through EF Core migrations:
 
 ```bash
@@ -86,7 +88,13 @@ dotnet ef migrations add MigrationName
 dotnet ef database update
 ```
 
-The app also applies pending migrations on startup, so Render deploys pick up committed migrations automatically.
+Keep Render startup independent from the database unless you intentionally need automatic migrations. Automatic startup migrations are opt-in:
+
+```text
+Database__MigrateOnStartup=true
+```
+
+For the current free-tier deployment, leave this unset or `false` and apply migrations locally or from a controlled job before deploying schema-dependent code.
 
 ## Production Environment Variables
 
@@ -98,6 +106,7 @@ App__FrontendUrl=https://pull-sight.vercel.app
 GitHub__ClientId=your-client-id
 GitHub__ClientSecret=your-client-secret
 ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
+Database__MigrateOnStartup=false
 ```
 
 `App__FrontendUrl` is also included in the backend CORS allow-list, so one frontend domain only needs that one variable. Add extra allowed origins only when you intentionally support additional frontend domains:
