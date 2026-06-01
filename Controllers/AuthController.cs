@@ -21,7 +21,8 @@ public sealed class AuthController(
     PullSightDbContext dbContext,
     IDataProtectionProvider dataProtectionProvider,
     IConfiguration configuration,
-    IOptions<GitHubOAuthOptions> gitHubOptions) : ControllerBase
+    IOptions<GitHubOAuthOptions> gitHubOptions,
+    ILogger<AuthController> logger) : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IDataProtector stateProtector = dataProtectionProvider.CreateProtector("PullSight.GitHubOAuthState.v1");
@@ -68,7 +69,7 @@ public sealed class AuthController(
         var token = await gitHubOAuthService.ExchangeCodeAsync(code, redirectUri, cancellationToken);
         var profile = await gitHubOAuthService.GetUserAsync(token.AccessToken, cancellationToken);
         var email = profile.Email ?? await gitHubOAuthService.GetPrimaryEmailAsync(token.AccessToken, cancellationToken);
-        await UpsertGitHubUserAsync(profile, email, token.Scope, cancellationToken);
+        await TryUpsertGitHubUserAsync(profile, email, token.Scope, cancellationToken);
 
         var claims = new List<Claim>
         {
@@ -183,6 +184,25 @@ public sealed class AuthController(
                 && origin.Port == requestedUri.Port);
 
         return allowed ? requestedUri.ToString() : fallback;
+    }
+
+    private async Task TryUpsertGitHubUserAsync(
+        GitHubUserProfile profile,
+        string? email,
+        string? scopes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await UpsertGitHubUserAsync(profile, email, scopes, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(
+                ex,
+                "Failed to persist GitHub login for user {GitHubLogin}. Continuing with cookie sign-in.",
+                profile.Login);
+        }
     }
 
     private async Task UpsertGitHubUserAsync(
