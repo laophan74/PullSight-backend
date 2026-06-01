@@ -79,7 +79,13 @@ ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
 
 Supabase URI-style strings like `postgresql://...` are supported; the backend normalizes them for Npgsql in `Program.cs`.
 
-If Render can deploy but `GET /api/health/db` fails, use the Supabase pooler connection string from the Supabase dashboard instead of the direct database host. The Render environment variable name stays the same: `ConnectionStrings__DefaultConnection`.
+For Render, use the Supabase transaction pooler instead of the direct database host. The direct host for this project resolves IPv6-only.
+
+```text
+ConnectionStrings__DefaultConnection=postgresql://postgres.syshrmyuimqoitbpijea:<database-password>@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres
+```
+
+The local backend has been verified healthy against this pooler URL.
 
 Database schema is managed through EF Core migrations:
 

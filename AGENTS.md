@@ -31,7 +31,7 @@ ConnectionStrings__DefaultConnection=...
 
 `App__FrontendUrl` is the source of truth for the primary frontend origin and is included in CORS automatically. `Cors__AllowedOrigins__*` is only for extra frontend origins. Never commit OAuth secrets; use Render env vars or local `dotnet user-secrets`.
 
-Supabase Postgres is connected through EF Core + Npgsql. The backend accepts Supabase URI-style connection strings and normalizes them in `Program.cs`. EF Core migrations are committed under `Migrations/`. Startup migrations are opt-in with `Database__MigrateOnStartup=true`; keep this false on Render unless explicitly needed.
+Supabase Postgres is connected through EF Core + Npgsql. The backend accepts Supabase URI-style connection strings and normalizes them in `Program.cs`. EF Core migrations are committed under `Migrations/`. Startup migrations are opt-in with `Database__MigrateOnStartup=true`; keep this false on Render unless explicitly needed. Render should use the transaction pooler host `aws-1-ap-southeast-1.pooler.supabase.com:6543` with username `postgres.syshrmyuimqoitbpijea`.
 
 ## Standards
 
