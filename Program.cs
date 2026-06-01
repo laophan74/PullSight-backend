@@ -40,6 +40,7 @@ builder.Services.AddDbContext<PullSightDbContext>(options =>
 });
 builder.Services.Configure<GitHubOAuthOptions>(builder.Configuration.GetSection("GitHub"));
 builder.Services.AddHttpClient<GitHubOAuthService>();
+builder.Services.AddHttpClient<GitHubApiService>();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedHost | ForwardedHeaders.XForwardedProto;
