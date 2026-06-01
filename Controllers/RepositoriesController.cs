@@ -28,4 +28,28 @@ public sealed class RepositoriesController(GitHubApiService gitHubApiService) : 
 
         return Ok(repositories);
     }
+
+    [HttpGet("{owner}/{name}/pull-requests")]
+    public async Task<ActionResult<IReadOnlyList<GitHubPullRequestResponse>>> ListPullRequests(
+        string owner,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        var accessToken = await HttpContext.GetTokenAsync("access_token");
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return Problem(
+                title: "GitHub token is missing.",
+                detail: "Log in with GitHub again so PullSight can load pull requests.",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var pullRequests = await gitHubApiService.GetPullRequestsAsync(
+            owner,
+            name,
+            accessToken,
+            cancellationToken);
+
+        return Ok(pullRequests);
+    }
 }

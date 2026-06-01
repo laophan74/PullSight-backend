@@ -41,6 +41,40 @@ public sealed class GitHubApiService(HttpClient httpClient)
         return repositories;
     }
 
+    public async Task<IReadOnlyList<GitHubPullRequestResponse>> GetPullRequestsAsync(
+        string owner,
+        string name,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var pullRequests = new List<GitHubPullRequestResponse>();
+        var encodedOwner = Uri.EscapeDataString(owner);
+        var encodedName = Uri.EscapeDataString(name);
+
+        for (var page = 1; page <= MaxPages; page++)
+        {
+            using var request = CreateGitHubRequest(
+                HttpMethod.Get,
+                $"https://api.github.com/repos/{encodedOwner}/{encodedName}/pulls?state=open&sort=updated&direction=desc&per_page={PerPage}&page={page}",
+                accessToken);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var pageItems = await response.Content.ReadFromJsonAsync<IReadOnlyList<GitHubPullRequestApiResponse>>(
+                JsonOptions,
+                cancellationToken) ?? [];
+
+            pullRequests.AddRange(pageItems.Select(ToPullRequestResponse));
+
+            if (pageItems.Count < PerPage)
+            {
+                break;
+            }
+        }
+
+        return pullRequests;
+    }
+
     private static GitHubRepositoryResponse ToRepositoryResponse(GitHubRepositoryApiResponse repository)
     {
         var visibility = repository.Private ? "private" : "public";
@@ -59,6 +93,23 @@ public sealed class GitHubApiService(HttpClient httpClient)
             repository.PushedAt,
             DateTimeOffset.UtcNow,
             repository.HtmlUrl);
+    }
+
+    private static GitHubPullRequestResponse ToPullRequestResponse(GitHubPullRequestApiResponse pullRequest)
+    {
+        return new GitHubPullRequestResponse(
+            pullRequest.Id,
+            pullRequest.Number,
+            pullRequest.Title,
+            pullRequest.User.Login,
+            pullRequest.Head.Ref,
+            pullRequest.Base.Ref,
+            pullRequest.Head.Sha,
+            pullRequest.ChangedFiles,
+            pullRequest.Additions,
+            pullRequest.Deletions,
+            pullRequest.UpdatedAt,
+            pullRequest.HtmlUrl);
     }
 
     private static HttpRequestMessage CreateGitHubRequest(HttpMethod method, string uri, string accessToken)
@@ -89,4 +140,24 @@ public sealed class GitHubApiService(HttpClient httpClient)
         string HtmlUrl);
 
     private sealed record GitHubRepositoryOwner(string Login);
+
+    private sealed record GitHubPullRequestApiResponse(
+        long Id,
+        int Number,
+        string Title,
+        GitHubPullRequestUser User,
+        GitHubPullRequestRef Head,
+        GitHubPullRequestRef Base,
+        [property: JsonPropertyName("changed_files")]
+        int ChangedFiles,
+        int Additions,
+        int Deletions,
+        [property: JsonPropertyName("updated_at")]
+        DateTimeOffset UpdatedAt,
+        [property: JsonPropertyName("html_url")]
+        string HtmlUrl);
+
+    private sealed record GitHubPullRequestUser(string Login);
+
+    private sealed record GitHubPullRequestRef(string Ref, string Sha);
 }
