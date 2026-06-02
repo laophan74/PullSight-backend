@@ -35,7 +35,9 @@ public sealed class ReviewAnalysisOrchestrator(
                 repositoryName,
                 pullRequestDiff.Number);
 
-            return await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
+            var reviewRun = await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
+
+            return WithStorageUnavailableSummary(reviewRun);
         }
     }
 
@@ -141,6 +143,14 @@ public sealed class ReviewAnalysisOrchestrator(
         return reviewRun with
         {
             Summary = $"{reviewRun.Summary} Gemini daily quota is exhausted, so PullSight used the rule-based fallback."
+        };
+    }
+
+    private static ReviewRunResponse WithStorageUnavailableSummary(ReviewRunResponse reviewRun)
+    {
+        return reviewRun with
+        {
+            Summary = $"{reviewRun.Summary} Review storage is temporarily unavailable, so this result was not cached."
         };
     }
 }
