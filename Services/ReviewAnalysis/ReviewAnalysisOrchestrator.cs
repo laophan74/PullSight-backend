@@ -18,6 +18,34 @@ public sealed class ReviewAnalysisOrchestrator(
         GitHubPullRequestDiffResponse pullRequestDiff,
         CancellationToken cancellationToken)
     {
+        try
+        {
+            return await AnalyzeWithPersistenceAsync(
+                githubUserId,
+                login,
+                repositoryName,
+                pullRequestDiff,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(
+                exception,
+                "Review persistence/cache failed for {RepositoryName}#{PullRequestNumber}. Returning an uncached review.",
+                repositoryName,
+                pullRequestDiff.Number);
+
+            return await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
+        }
+    }
+
+    private async Task<ReviewRunResponse> AnalyzeWithPersistenceAsync(
+        long githubUserId,
+        string login,
+        string repositoryName,
+        GitHubPullRequestDiffResponse pullRequestDiff,
+        CancellationToken cancellationToken)
+    {
         var context = await persistenceService.EnsureContextAsync(
             githubUserId,
             login,
@@ -84,6 +112,28 @@ public sealed class ReviewAnalysisOrchestrator(
             reviewRun,
             quotaRemaining,
             cancellationToken);
+    }
+
+    private async Task<ReviewRunResponse> AnalyzeWithoutPersistenceAsync(
+        string repositoryName,
+        GitHubPullRequestDiffResponse pullRequestDiff,
+        CancellationToken cancellationToken)
+    {
+        if (!geminiAnalyzer.IsConfigured)
+        {
+            return await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
+        }
+
+        try
+        {
+            return await geminiAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or JsonException)
+        {
+            logger.LogWarning(exception, "Gemini analysis failed during uncached review. Falling back to rule-based analyzer.");
+
+            return await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
+        }
     }
 
     private static ReviewRunResponse WithQuotaSummary(ReviewRunResponse reviewRun)
