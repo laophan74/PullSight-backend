@@ -52,4 +52,30 @@ public sealed class RepositoriesController(GitHubApiService gitHubApiService) : 
 
         return Ok(pullRequests);
     }
+
+    [HttpGet("{owner}/{name}/pull-requests/{number:int}/diff")]
+    public async Task<ActionResult<GitHubPullRequestDiffResponse>> GetPullRequestDiff(
+        string owner,
+        string name,
+        int number,
+        CancellationToken cancellationToken)
+    {
+        var accessToken = await HttpContext.GetTokenAsync("access_token");
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return Problem(
+                title: "GitHub token is missing.",
+                detail: "Log in with GitHub again so PullSight can fetch pull request diffs.",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var diff = await gitHubApiService.GetPullRequestDiffAsync(
+            owner,
+            name,
+            number,
+            accessToken,
+            cancellationToken);
+
+        return Ok(diff);
+    }
 }

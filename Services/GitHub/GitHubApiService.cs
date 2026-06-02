@@ -75,6 +75,62 @@ public sealed class GitHubApiService(HttpClient httpClient)
         return pullRequests;
     }
 
+    public async Task<GitHubPullRequestDiffResponse> GetPullRequestDiffAsync(
+        string owner,
+        string name,
+        int number,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var encodedOwner = Uri.EscapeDataString(owner);
+        var encodedName = Uri.EscapeDataString(name);
+
+        using var pullRequestRequest = CreateGitHubRequest(
+            HttpMethod.Get,
+            $"https://api.github.com/repos/{encodedOwner}/{encodedName}/pulls/{number}",
+            accessToken);
+        using var pullRequestResponse = await httpClient.SendAsync(pullRequestRequest, cancellationToken);
+        pullRequestResponse.EnsureSuccessStatusCode();
+
+        var pullRequest = await pullRequestResponse.Content.ReadFromJsonAsync<GitHubPullRequestApiResponse>(
+            JsonOptions,
+            cancellationToken)
+            ?? throw new InvalidOperationException("GitHub returned an empty pull request response.");
+
+        var files = new List<GitHubPullRequestFileResponse>();
+
+        for (var page = 1; page <= MaxPages; page++)
+        {
+            using var filesRequest = CreateGitHubRequest(
+                HttpMethod.Get,
+                $"https://api.github.com/repos/{encodedOwner}/{encodedName}/pulls/{number}/files?per_page={PerPage}&page={page}",
+                accessToken);
+            using var filesResponse = await httpClient.SendAsync(filesRequest, cancellationToken);
+            filesResponse.EnsureSuccessStatusCode();
+
+            var pageItems = await filesResponse.Content.ReadFromJsonAsync<IReadOnlyList<GitHubPullRequestFileApiResponse>>(
+                JsonOptions,
+                cancellationToken) ?? [];
+
+            files.AddRange(pageItems.Select(ToPullRequestFileResponse));
+
+            if (pageItems.Count < PerPage)
+            {
+                break;
+            }
+        }
+
+        return new GitHubPullRequestDiffResponse(
+            pullRequest.Id,
+            pullRequest.Number,
+            pullRequest.Title,
+            pullRequest.Head.Sha,
+            pullRequest.ChangedFiles,
+            pullRequest.Additions,
+            pullRequest.Deletions,
+            files);
+    }
+
     private static GitHubRepositoryResponse ToRepositoryResponse(GitHubRepositoryApiResponse repository)
     {
         var visibility = repository.Private ? "private" : "public";
@@ -110,6 +166,22 @@ public sealed class GitHubApiService(HttpClient httpClient)
             pullRequest.Deletions,
             pullRequest.UpdatedAt,
             pullRequest.HtmlUrl);
+    }
+
+    private static GitHubPullRequestFileResponse ToPullRequestFileResponse(
+        GitHubPullRequestFileApiResponse file)
+    {
+        return new GitHubPullRequestFileResponse(
+            file.Sha,
+            file.FileName,
+            file.Status,
+            file.Additions,
+            file.Deletions,
+            file.Changes,
+            file.Patch,
+            file.BlobUrl,
+            file.RawUrl,
+            file.PreviousFileName);
     }
 
     private static HttpRequestMessage CreateGitHubRequest(HttpMethod method, string uri, string accessToken)
@@ -160,4 +232,20 @@ public sealed class GitHubApiService(HttpClient httpClient)
     private sealed record GitHubPullRequestUser(string Login);
 
     private sealed record GitHubPullRequestRef(string Ref, string Sha);
+
+    private sealed record GitHubPullRequestFileApiResponse(
+        string Sha,
+        [property: JsonPropertyName("filename")]
+        string FileName,
+        string Status,
+        int Additions,
+        int Deletions,
+        int Changes,
+        string? Patch,
+        [property: JsonPropertyName("blob_url")]
+        string BlobUrl,
+        [property: JsonPropertyName("raw_url")]
+        string RawUrl,
+        [property: JsonPropertyName("previous_filename")]
+        string? PreviousFileName);
 }
