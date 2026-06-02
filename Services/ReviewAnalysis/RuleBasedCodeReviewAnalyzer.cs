@@ -1,9 +1,99 @@
+using PullSight.Api.Contracts.GitHub;
 using PullSight.Api.Contracts.Reviews;
 
 namespace PullSight.Api.Services.ReviewAnalysis;
 
 public sealed class RuleBasedCodeReviewAnalyzer : ICodeReviewAnalyzer
 {
+    public Task<ReviewRunResponse> AnalyzeAsync(
+        string repositoryName,
+        GitHubPullRequestDiffResponse pullRequestDiff,
+        CancellationToken cancellationToken)
+    {
+        var findings = new List<ReviewFindingResponse>();
+
+        foreach (var file in pullRequestDiff.Files)
+        {
+            var patch = file.Patch ?? string.Empty;
+            var line = GetFirstAddedLineNumber(patch);
+
+            if (ContainsAny(patch, "password", "secret", "api_key", "apikey", "token"))
+            {
+                findings.Add(new(
+                    $"rule_secret_{findings.Count + 1}",
+                    "high",
+                    file.FileName,
+                    line,
+                    "Possible secret or credential in changed code",
+                    "The patch contains credential-like terms. Verify no API keys, passwords, or tokens are committed.",
+                    "rule"));
+            }
+
+            if (ContainsAny(patch, "ExecuteSqlRaw", "FromSqlRaw", "SELECT ", "INSERT ", "UPDATE ", "DELETE "))
+            {
+                findings.Add(new(
+                    $"rule_sql_{findings.Count + 1}",
+                    "medium",
+                    file.FileName,
+                    line,
+                    "SQL-sensitive change needs review",
+                    "The patch touches raw SQL or SQL-like statements. Confirm inputs are parameterized and validated.",
+                    "rule"));
+            }
+
+            if (ContainsAny(patch, "TODO", "FIXME", "HACK"))
+            {
+                findings.Add(new(
+                    $"rule_todo_{findings.Count + 1}",
+                    "low",
+                    file.FileName,
+                    line,
+                    "Temporary implementation marker left in patch",
+                    "The patch includes TODO/FIXME/HACK markers. Confirm they are intentional before merge.",
+                    "rule"));
+            }
+        }
+
+        if (pullRequestDiff.ChangedFiles >= 20 || pullRequestDiff.Additions >= 800)
+        {
+            findings.Add(new(
+                "rule_large_pr",
+                "medium",
+                pullRequestDiff.Files.FirstOrDefault()?.FileName ?? "pull-request",
+                1,
+                "Large pull request may need narrower review",
+                "The PR is large enough to hide behavioral regressions. Consider splitting it or adding focused tests.",
+                "rule"));
+        }
+
+        var riskScore = Math.Clamp(
+            findings.Sum(finding => finding.Severity switch
+            {
+                "high" => 28,
+                "medium" => 16,
+                "low" => 7,
+                _ => 10,
+            }),
+            15,
+            85);
+
+        var response = new ReviewRunResponse(
+            $"fallback_{Guid.NewGuid():N}",
+            repositoryName,
+            pullRequestDiff.Number,
+            pullRequestDiff.HeadSha,
+            "fallback",
+            "RuleBasedCodeReviewAnalyzer",
+            findings.Count == 0 ? 18 : riskScore,
+            5,
+            findings.Count == 0
+                ? "No obvious rule-based risks were detected in the changed files."
+                : "Static fallback review completed. Findings are heuristic and should be checked manually.",
+            findings);
+
+        return Task.FromResult(response);
+    }
+
     public Task<ReviewRunResponse> AnalyzeDemoAsync(CancellationToken cancellationToken)
     {
         var findings = new List<ReviewFindingResponse>
@@ -39,5 +129,45 @@ public sealed class RuleBasedCodeReviewAnalyzer : ICodeReviewAnalyzer
             findings);
 
         return Task.FromResult(response);
+    }
+
+    private static bool ContainsAny(string value, params string[] terms)
+    {
+        return terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int GetFirstAddedLineNumber(string patch)
+    {
+        var currentNewLine = 1;
+
+        foreach (var line in patch.Split('\n'))
+        {
+            if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                var plusIndex = line.IndexOf('+', StringComparison.Ordinal);
+                if (plusIndex >= 0)
+                {
+                    var lineStart = line[(plusIndex + 1)..].Split(',', ' ').FirstOrDefault();
+                    if (int.TryParse(lineStart, out var parsedLine))
+                    {
+                        currentNewLine = parsedLine;
+                    }
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("+", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal))
+            {
+                return currentNewLine;
+            }
+
+            if (!line.StartsWith("-", StringComparison.Ordinal))
+            {
+                currentNewLine++;
+            }
+        }
+
+        return Math.Max(1, currentNewLine);
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PullSight.Api.Data;
 using PullSight.Api.Services.GitHub;
+using PullSight.Api.Services.ReviewAnalysis;
 
 var builder = WebApplication.CreateBuilder(args);
 var port = Environment.GetEnvironmentVariable("PORT");
@@ -39,8 +40,10 @@ builder.Services.AddDbContext<PullSightDbContext>(options =>
     options.UseNpgsql(ToNpgsqlConnectionString(connectionString));
 });
 builder.Services.Configure<GitHubOAuthOptions>(builder.Configuration.GetSection("GitHub"));
+builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection("Gemini"));
 builder.Services.AddHttpClient<GitHubOAuthService>();
 builder.Services.AddHttpClient<GitHubApiService>();
+builder.Services.AddHttpClient<GeminiCodeReviewAnalyzer>();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedHost | ForwardedHeaders.XForwardedProto;
@@ -84,7 +87,8 @@ builder.Services.AddCors(options =>
         }
     });
 });
-builder.Services.AddScoped<PullSight.Api.Services.ReviewAnalysis.ICodeReviewAnalyzer, PullSight.Api.Services.ReviewAnalysis.RuleBasedCodeReviewAnalyzer>();
+builder.Services.AddScoped<RuleBasedCodeReviewAnalyzer>();
+builder.Services.AddScoped<ReviewAnalysisOrchestrator>();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
