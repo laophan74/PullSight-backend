@@ -37,6 +37,34 @@ GET  http://localhost:5200/api/auth/me
 POST http://localhost:5200/api/auth/logout
 ```
 
+GitHub browser endpoints:
+
+```text
+GET http://localhost:5200/api/repositories
+GET http://localhost:5200/api/repositories/{owner}/{name}/pull-requests
+GET http://localhost:5200/api/repositories/{owner}/{name}/pull-requests/{number}/diff
+```
+
+These endpoints require the auth cookie. They use the GitHub access token stored during OAuth sign-in and call GitHub API server-side.
+
+GitHub review endpoint:
+
+```text
+POST http://localhost:5200/api/reviews/github
+```
+
+Request body:
+
+```json
+{
+  "owner": "laophan74",
+  "name": "test-pull-requests",
+  "number": 10
+}
+```
+
+This endpoint requires the auth cookie. It fetches the selected PR diff, runs Gemini first, falls back to static rules when Gemini fails or is not configured, and returns both `reviewRun` and `diff`.
+
 Production health check:
 
 ```text
@@ -61,6 +89,13 @@ For local development, use user secrets or environment variables:
 dotnet user-secrets set "GitHub:ClientId" "your-client-id"
 dotnet user-secrets set "GitHub:ClientSecret" "your-client-secret"
 dotnet user-secrets set "App:FrontendUrl" "http://127.0.0.1:5173"
+```
+
+For local Gemini analysis:
+
+```bash
+dotnet user-secrets set "Gemini:ApiKey" "your-google-ai-studio-api-key"
+dotnet user-secrets set "Gemini:Model" "gemini-3.1-flash-lite"
 ```
 
 ## Supabase Postgres
@@ -112,6 +147,8 @@ App__FrontendUrl=https://pull-sight.vercel.app
 GitHub__ClientId=your-client-id
 GitHub__ClientSecret=your-client-secret
 GitHub__CallbackUrl=https://pullsight-backend.onrender.com/api/auth/github/callback
+Gemini__ApiKey=your-google-ai-studio-api-key
+Gemini__Model=gemini-3.1-flash-lite
 ConnectionStrings__DefaultConnection=your-supabase-postgres-connection-string
 Database__MigrateOnStartup=false
 Auth__PersistenceTimeoutSeconds=2
@@ -139,3 +176,20 @@ Current Render deployment:
 ```text
 https://pullsight-backend.onrender.com
 ```
+
+## Current GitHub Integration State
+
+Implemented:
+
+- OAuth login/logout/current user.
+- Repository Browser: list signed-in user's repos.
+- Pull Request Browser: list open PRs for selected repo.
+- PR diff fetching: fetch selected PR changed files, patch text, additions/deletions, and head SHA.
+- Gemini analysis: analyze selected PR diffs through `POST /api/reviews/github`.
+- Rule-based fallback: return static findings when Gemini fails, quota is unavailable, or the key is not configured.
+
+Next recommended backend feature:
+
+- Persist review runs and findings to Supabase Postgres.
+- Cache reviews by repository full name, PR number, and head SHA to avoid repeated Gemini calls.
+- Add daily quota tracking per user before calling Gemini.
