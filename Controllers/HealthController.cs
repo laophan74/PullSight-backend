@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using PullSight.Api.Data;
+using PullSight.Api.Data.Entities;
 
 namespace PullSight.Api.Controllers;
 
@@ -69,6 +70,105 @@ public sealed class HealthController(PullSightDbContext dbContext) : ControllerB
         finally
         {
             await connection.CloseAsync();
+        }
+    }
+
+    [HttpPost("db/review-write-test")]
+    public async Task<IActionResult> TestReviewWrite(CancellationToken cancellationToken)
+    {
+        var userId = await dbContext.Users
+            .Select(user => user.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (userId == Guid.Empty)
+        {
+            return Ok(new
+            {
+                status = "skipped",
+                reason = "No user exists to satisfy review_runs.UserId foreign key.",
+                utc = DateTimeOffset.UtcNow,
+            });
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var repository = new RepositoryRecord
+            {
+                GitHubRepositoryId = -DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Owner = "diagnostics",
+                Name = "write-test",
+                FullName = "diagnostics/write-test",
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            var pullRequest = new PullRequestRecord
+            {
+                RepositoryId = repository.Id,
+                Number = 1,
+                Title = "Diagnostics write test",
+                HeadSha = Guid.NewGuid().ToString("N"),
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            var reviewRun = new ReviewRun
+            {
+                UserId = userId,
+                RepositoryId = repository.Id,
+                PullRequestNumber = pullRequest.Number,
+                HeadSha = pullRequest.HeadSha,
+                Analyzer = "Diagnostics",
+                Source = "rule",
+                Status = "fallback",
+                RiskScore = 1,
+                Summary = "Rollback-only diagnostics review.",
+                CreatedAt = now,
+            };
+            reviewRun.Findings.Add(new ReviewFinding
+            {
+                Severity = "low",
+                Title = "Diagnostics finding",
+                FilePath = "diagnostics.txt",
+                LineNumber = 1,
+                RuleId = "diagnostics",
+                Message = "Rollback-only diagnostics finding.",
+                CreatedAt = now,
+            });
+
+            dbContext.Repositories.Add(repository);
+            dbContext.PullRequests.Add(pullRequest);
+            dbContext.ReviewRuns.Add(reviewRun);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.RollbackAsync(cancellationToken);
+
+            return Ok(new
+            {
+                status = "healthy",
+                wrote = new
+                {
+                    repository = true,
+                    pullRequest = true,
+                    reviewRun = true,
+                    reviewFinding = true,
+                },
+                rolledBack = true,
+                utc = DateTimeOffset.UtcNow,
+            });
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+
+            return Ok(new
+            {
+                status = "unhealthy",
+                error = exception.Message,
+                innerError = exception.InnerException?.Message,
+                exceptionType = exception.GetType().Name,
+                utc = DateTimeOffset.UtcNow,
+            });
         }
     }
 
