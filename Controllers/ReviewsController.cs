@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PullSight.Api.Contracts.GitHub;
 using PullSight.Api.Contracts.Reviews;
 using PullSight.Api.Services.GitHub;
 using PullSight.Api.Services.ReviewAnalysis;
@@ -13,7 +14,8 @@ namespace PullSight.Api.Controllers;
 public sealed class ReviewsController(
     RuleBasedCodeReviewAnalyzer demoAnalyzer,
     GitHubApiService gitHubApiService,
-    ReviewAnalysisOrchestrator reviewAnalysisOrchestrator) : ControllerBase
+    ReviewAnalysisOrchestrator reviewAnalysisOrchestrator,
+    ILogger<ReviewsController> logger) : ControllerBase
 {
     [HttpPost("demo")]
     public async Task<ActionResult<ReviewRunResponse>> AnalyzeDemo(CancellationToken cancellationToken)
@@ -58,18 +60,38 @@ public sealed class ReviewsController(
         }
 
         var login = User.FindFirstValue("github:login") ?? User.Identity?.Name ?? "github-user";
-        var diff = await gitHubApiService.GetPullRequestDiffAsync(
-            request.Owner,
-            request.Name,
-            request.Number,
-            accessToken,
-            cancellationToken);
-        var reviewRun = await reviewAnalysisOrchestrator.AnalyzeAndPersistAsync(
-            parsedGitHubUserId,
-            login,
-            $"{request.Owner}/{request.Name}",
-            diff,
-            cancellationToken);
+        GitHubPullRequestDiffResponse diff;
+        ReviewRunResponse reviewRun;
+
+        try
+        {
+            diff = await gitHubApiService.GetPullRequestDiffAsync(
+                request.Owner,
+                request.Name,
+                request.Number,
+                accessToken,
+                cancellationToken);
+            reviewRun = await reviewAnalysisOrchestrator.AnalyzeAndPersistAsync(
+                parsedGitHubUserId,
+                login,
+                $"{request.Owner}/{request.Name}",
+                diff,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(
+                exception,
+                "Failed to analyze PR {Owner}/{Name}#{Number}.",
+                request.Owner,
+                request.Name,
+                request.Number);
+
+            return Problem(
+                title: "Unable to analyze pull request.",
+                detail: "PullSight could not finish this review run. Check the backend logs for the saved exception.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
 
         return Ok(new PullRequestReviewResponse(reviewRun, diff));
     }
