@@ -1,13 +1,19 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
+using PullSight.Api.Contracts.GitHub;
+using PullSight.Api.Contracts.Reviews;
 using PullSight.Api.Data;
 using PullSight.Api.Data.Entities;
+using PullSight.Api.Services.ReviewAnalysis;
 
 namespace PullSight.Api.Controllers;
 
 [ApiController]
 [Route("api/health")]
-public sealed class HealthController(PullSightDbContext dbContext) : ControllerBase
+public sealed class HealthController(
+    PullSightDbContext dbContext,
+    ReviewPersistenceService reviewPersistenceService,
+    ReviewQuotaService reviewQuotaService) : ControllerBase
 {
     private static readonly string[] RequiredTables =
     [
@@ -164,6 +170,135 @@ public sealed class HealthController(PullSightDbContext dbContext) : ControllerB
             return Ok(new
             {
                 status = "unhealthy",
+                error = exception.Message,
+                innerError = exception.InnerException?.Message,
+                exceptionType = exception.GetType().Name,
+                utc = DateTimeOffset.UtcNow,
+            });
+        }
+    }
+
+    [HttpPost("db/review-flow-test")]
+    public async Task<IActionResult> TestReviewFlow(CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .Select(existingUser => new
+            {
+                existingUser.Id,
+                existingUser.GitHubUserId,
+                existingUser.Login,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (user is null)
+        {
+            return Ok(new
+            {
+                status = "skipped",
+                reason = "No user exists to satisfy review flow foreign keys.",
+                utc = DateTimeOffset.UtcNow,
+            });
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var stage = "start";
+
+        try
+        {
+            var repositoryId = -DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var headSha = Guid.NewGuid().ToString("N");
+            var diff = new GitHubPullRequestDiffResponse(
+                repositoryId,
+                "diagnostics/review-flow-test",
+                repositoryId,
+                1,
+                "Diagnostics review flow test",
+                headSha,
+                1,
+                1,
+                0,
+                [
+                    new GitHubPullRequestFileResponse(
+                        headSha,
+                        "diagnostics.txt",
+                        "added",
+                        1,
+                        0,
+                        1,
+                        "@@ -0,0 +1 @@\n+diagnostics",
+                        "https://example.com/blob",
+                        "https://example.com/raw",
+                        null),
+                ]);
+
+            stage = "ensure-context";
+            var context = await reviewPersistenceService.EnsureContextAsync(
+                user.GitHubUserId,
+                user.Login,
+                diff,
+                cancellationToken);
+
+            stage = "quota-read";
+            var quotaBefore = await reviewQuotaService.GetGeminiReviewsRemainingAsync(
+                context.UserId,
+                cancellationToken);
+
+            stage = "quota-reserve";
+            var quota = await reviewQuotaService.TryReserveGeminiReviewAsync(
+                context.UserId,
+                cancellationToken);
+
+            stage = "save-review";
+            var savedReview = await reviewPersistenceService.SaveReviewRunAsync(
+                context.UserId,
+                context.RepositoryId,
+                new ReviewRunResponse(
+                    Guid.NewGuid().ToString("N"),
+                    diff.RepositoryFullName,
+                    diff.Number,
+                    diff.HeadSha,
+                    "fallback",
+                    "Diagnostics",
+                    1,
+                    quota.Remaining,
+                    DateTimeOffset.UtcNow,
+                    "Rollback-only review flow diagnostic.",
+                    [
+                        new ReviewFindingResponse(
+                            Guid.NewGuid().ToString("N"),
+                            "low",
+                            "diagnostics.txt",
+                            1,
+                            "Diagnostics finding",
+                            "Rollback-only review flow diagnostic finding.",
+                            "rule"),
+                    ]),
+                quota.Remaining,
+                cancellationToken);
+
+            await transaction.RollbackAsync(cancellationToken);
+
+            return Ok(new
+            {
+                status = "healthy",
+                quotaBefore,
+                quotaReserved = quota.WasReserved,
+                quotaRemaining = quota.Remaining,
+                savedReviewStatus = savedReview.Status,
+                savedFindings = savedReview.Findings.Count,
+                rolledBack = true,
+                utc = DateTimeOffset.UtcNow,
+            });
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+
+            return Ok(new
+            {
+                status = "unhealthy",
+                stage,
                 error = exception.Message,
                 innerError = exception.InnerException?.Message,
                 exceptionType = exception.GetType().Name,
