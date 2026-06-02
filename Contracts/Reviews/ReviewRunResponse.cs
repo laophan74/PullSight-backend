@@ -9,5 +9,6 @@ public sealed record ReviewRunResponse(
     string Analyzer,
     int RiskScore,
     int QuotaRemaining,
+    DateTimeOffset CreatedAt,
     string Summary,
     IReadOnlyList<ReviewFindingResponse> Findings);

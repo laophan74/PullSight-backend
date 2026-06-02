@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -47,13 +48,25 @@ public sealed class ReviewsController(
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
+        var githubUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!long.TryParse(githubUserId, out var parsedGitHubUserId))
+        {
+            return Problem(
+                title: "GitHub user id is missing.",
+                detail: "Log in with GitHub again so PullSight can persist review results.",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var login = User.FindFirstValue("github:login") ?? User.Identity?.Name ?? "github-user";
         var diff = await gitHubApiService.GetPullRequestDiffAsync(
             request.Owner,
             request.Name,
             request.Number,
             accessToken,
             cancellationToken);
-        var reviewRun = await reviewAnalysisOrchestrator.AnalyzeAsync(
+        var reviewRun = await reviewAnalysisOrchestrator.AnalyzeAndPersistAsync(
+            parsedGitHubUserId,
+            login,
             $"{request.Owner}/{request.Name}",
             diff,
             cancellationToken);

@@ -14,6 +14,8 @@ public sealed class GeminiCodeReviewAnalyzer(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly GeminiOptions options = options.Value;
 
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(options.ApiKey);
+
     public async Task<ReviewRunResponse> AnalyzeAsync(
         string repositoryName,
         GitHubPullRequestDiffResponse pullRequestDiff,
@@ -76,7 +78,8 @@ public sealed class GeminiCodeReviewAnalyzer(
             "completed",
             $"Gemini {options.Model}",
             Math.Clamp(analysis.RiskScore, 0, 100),
-            5,
+            0,
+            DateTimeOffset.UtcNow,
             string.IsNullOrWhiteSpace(analysis.Summary)
                 ? "Gemini completed a review of the changed files."
                 : analysis.Summary,

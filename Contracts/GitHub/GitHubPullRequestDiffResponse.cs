@@ -1,6 +1,8 @@
 namespace PullSight.Api.Contracts.GitHub;
 
 public sealed record GitHubPullRequestDiffResponse(
+    long RepositoryId,
+    string RepositoryFullName,
     long Id,
     int Number,
     string Title,

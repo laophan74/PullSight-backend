@@ -121,6 +121,8 @@ public sealed class GitHubApiService(HttpClient httpClient)
         }
 
         return new GitHubPullRequestDiffResponse(
+            pullRequest.Base.Repo.Id,
+            pullRequest.Base.Repo.FullName,
             pullRequest.Id,
             pullRequest.Number,
             pullRequest.Title,
@@ -231,7 +233,20 @@ public sealed class GitHubApiService(HttpClient httpClient)
 
     private sealed record GitHubPullRequestUser(string Login);
 
-    private sealed record GitHubPullRequestRef(string Ref, string Sha);
+    private sealed record GitHubPullRequestRef(
+        string Ref,
+        string Sha,
+        GitHubPullRequestRepository Repo);
+
+    private sealed record GitHubPullRequestRepository(
+        long Id,
+        string Name,
+        [property: JsonPropertyName("full_name")]
+        string FullName,
+        GitHubRepositoryOwner Owner,
+        bool Private,
+        [property: JsonPropertyName("default_branch")]
+        string? DefaultBranch);
 
     private sealed record GitHubPullRequestFileApiResponse(
         string Sha,
