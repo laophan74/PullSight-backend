@@ -37,7 +37,16 @@ builder.Services.AddDbContext<PullSightDbContext>(options =>
         throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
     }
 
-    options.UseNpgsql(ToNpgsqlConnectionString(connectionString));
+    options.UseNpgsql(
+        ToNpgsqlConnectionString(connectionString),
+        npgsqlOptions =>
+        {
+            npgsqlOptions.CommandTimeout(60);
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(3),
+                errorCodesToAdd: null);
+        });
 });
 builder.Services.Configure<GitHubOAuthOptions>(builder.Configuration.GetSection("GitHub"));
 builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection("Gemini"));
@@ -139,6 +148,9 @@ static string ToNpgsqlConnectionString(string connectionString)
         Database = uri.AbsolutePath.TrimStart('/'),
         Username = Uri.UnescapeDataString(userInfo[0]),
         SslMode = SslMode.Require,
+        Timeout = 15,
+        CommandTimeout = 60,
+        KeepAlive = 30,
     };
 
     if (userInfo.Length > 1)
