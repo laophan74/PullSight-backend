@@ -9,11 +9,19 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
 {
     public async Task<ReviewComparisonResult> CompareAsync(
         long githubUserId,
-        Guid baseReviewRunId,
-        Guid targetReviewRunId,
+        string baseReviewRunId,
+        string targetReviewRunId,
         CancellationToken cancellationToken)
     {
-        if (baseReviewRunId == targetReviewRunId)
+        if (!Guid.TryParse(baseReviewRunId, out var parsedBaseReviewRunId)
+            || !Guid.TryParse(targetReviewRunId, out var parsedTargetReviewRunId))
+        {
+            return ReviewComparisonResult.Invalid(
+                "invalid_review_id",
+                "Both review run ids must be valid.");
+        }
+
+        if (parsedBaseReviewRunId == parsedTargetReviewRunId)
         {
             return ReviewComparisonResult.Invalid(
                 "reviews_must_differ",
@@ -35,13 +43,13 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
             .AsNoTracking()
             .Where(run =>
                 run.UserId == userId.Value
-                && (run.Id == baseReviewRunId || run.Id == targetReviewRunId))
+                && (run.Id == parsedBaseReviewRunId || run.Id == parsedTargetReviewRunId))
             .Include(run => run.Repository)
             .Include(run => run.Findings)
             .ToListAsync(cancellationToken);
 
-        var baseRun = runs.SingleOrDefault(run => run.Id == baseReviewRunId);
-        var targetRun = runs.SingleOrDefault(run => run.Id == targetReviewRunId);
+        var baseRun = runs.SingleOrDefault(run => run.Id == parsedBaseReviewRunId);
+        var targetRun = runs.SingleOrDefault(run => run.Id == parsedTargetReviewRunId);
 
         if (baseRun is null || targetRun is null)
         {

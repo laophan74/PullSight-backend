@@ -53,8 +53,8 @@ public sealed class ReviewComparisonServiceTests
 
         var result = await new ReviewComparisonService(dbContext).CompareAsync(
             user.GitHubUserId,
-            baseRun.Id,
-            targetRun.Id,
+            baseRun.Id.ToString("N"),
+            targetRun.Id.ToString("N"),
             CancellationToken.None);
 
         Assert.Equal(ReviewComparisonResultStatus.Invalid, result.Status);
@@ -75,12 +75,47 @@ public sealed class ReviewComparisonServiceTests
 
         var result = await new ReviewComparisonService(dbContext).CompareAsync(
             owner.GitHubUserId,
-            baseRun.Id,
-            targetRun.Id,
+            baseRun.Id.ToString("N"),
+            targetRun.Id.ToString("N"),
             CancellationToken.None);
 
         Assert.Equal(ReviewComparisonResultStatus.NotFound, result.Status);
         Assert.Equal("review_not_found", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CompareAsync_AcceptsCompactReviewIds()
+    {
+        await using var dbContext = CreateDbContext();
+        var user = CreateUser(1001);
+        var repository = CreateRepository();
+        var baseRun = CreateRun(repository, 12, "base", user);
+        var targetRun = CreateRun(repository, 12, "target", user);
+        dbContext.AddRange(user, repository, baseRun, targetRun);
+        await dbContext.SaveChangesAsync();
+
+        var result = await new ReviewComparisonService(dbContext).CompareAsync(
+            user.GitHubUserId,
+            baseRun.Id.ToString("N"),
+            targetRun.Id.ToString("N"),
+            CancellationToken.None);
+
+        Assert.Equal(ReviewComparisonResultStatus.Success, result.Status);
+    }
+
+    [Fact]
+    public async Task CompareAsync_RejectsInvalidReviewIds()
+    {
+        await using var dbContext = CreateDbContext();
+
+        var result = await new ReviewComparisonService(dbContext).CompareAsync(
+            1001,
+            "not-a-review-id",
+            Guid.NewGuid().ToString("N"),
+            CancellationToken.None);
+
+        Assert.Equal(ReviewComparisonResultStatus.Invalid, result.Status);
+        Assert.Equal("invalid_review_id", result.ErrorCode);
     }
 
     private static PullSightDbContext CreateDbContext()
