@@ -63,7 +63,9 @@ Request body:
 }
 ```
 
-This endpoint requires the auth cookie. It fetches the selected PR diff, runs Gemini first, falls back to static rules when Gemini fails or is not configured, and returns both `reviewRun` and `diff`.
+This endpoint requires the auth cookie. It fetches the selected PR diff, checks the persisted cache by repository + PR number + head SHA, runs Gemini or static fallback on a cache miss, saves the review run/findings, and returns both `reviewRun` and `diff`.
+
+Analyzing the same PR head SHA again returns `status: cached`, does not call Gemini, and does not insert duplicate review rows.
 
 Production health check:
 
@@ -186,10 +188,15 @@ Implemented:
 - Pull Request Browser: list open PRs for selected repo.
 - PR diff fetching: fetch selected PR changed files, patch text, additions/deletions, and head SHA.
 - Gemini analysis: analyze selected PR diffs through `POST /api/reviews/github`.
-- Rule-based fallback: return static findings when Gemini fails, quota is unavailable, or the key is not configured.
+- Rule-based fallback: return static findings when Gemini fails or the key is not configured.
+- Review persistence: store repositories, pull requests, review runs, and findings in Supabase Postgres.
+- Review cache: reuse saved results by repository + PR number + head SHA.
+- Bounded database latency: return an uncached review when Supabase is temporarily unavailable instead of hanging the request.
 
 Next recommended backend feature:
 
-- Persist review runs and findings to Supabase Postgres.
-- Cache reviews by repository full name, PR number, and head SHA to avoid repeated Gemini calls.
-- Add daily quota tracking per user before calling Gemini.
+- Add a user-scoped, paginated Review History endpoint.
+- Return saved review summaries and finding counts.
+- Add a saved review detail endpoint or reusable response mapper for reopening a review.
+
+Daily Gemini quota tracking is deferred. The runtime does not read or write `usage_limits`.
