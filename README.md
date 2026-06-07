@@ -72,9 +72,21 @@ Review History endpoints:
 ```text
 GET http://localhost:5200/api/reviews?page=1&pageSize=10
 GET http://localhost:5200/api/reviews/{reviewRunId}
+POST http://localhost:5200/api/reviews/compare
 ```
 
 Both require the auth cookie. The list is paginated, and both queries filter by the signed-in user's persisted ownership. A review id owned by another user returns `404`.
+
+Compare request body:
+
+```json
+{
+  "baseReviewRunId": "review-run-guid",
+  "targetReviewRunId": "review-run-guid"
+}
+```
+
+The comparison endpoint requires two distinct owned runs from the same repository and pull request. It returns run metadata plus `added`, `resolved`, and `unchanged` finding groups. Finding identity uses normalized severity, path, line, title, and rule/source; database finding IDs are not used for matching.
 
 Production health check:
 
@@ -201,10 +213,11 @@ Implemented:
 - Review persistence: store repositories, pull requests, review runs, and findings in Supabase Postgres.
 - Review cache: reuse saved results by repository + PR number + head SHA.
 - Review History: paginated user-scoped list and ownership-protected detail with findings.
+- Compare Reviews: ownership-protected same-PR comparison across head SHAs.
 - Bounded database latency: return an uncached review when Supabase is temporarily unavailable instead of hanging the request.
 
 Next recommended backend feature:
 
-- Compare owned review runs across head SHAs for the same pull request.
+- Add user-scoped repository and PR filters to Review History.
 
 Daily Gemini quota tracking is deferred. The runtime does not read or write `usage_limits`.

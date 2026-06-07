@@ -35,6 +35,8 @@ Supabase Postgres is connected through EF Core + Npgsql. The backend accepts Sup
 
 Review History is implemented through `GET /api/reviews` and `GET /api/reviews/{reviewRunId}`. Keep both endpoints cookie-authenticated and ownership-scoped through `ReviewHistoryService`.
 
+Compare Reviews is implemented through `POST /api/reviews/compare`. Keep ownership, same-PR validation, queries, and finding classification in `ReviewComparisonService`. Matching must use stable finding content identity rather than database IDs.
+
 ## Standards
 
 - Use ASP.NET Core Web API.
@@ -52,7 +54,8 @@ Review History is implemented through `GET /api/reviews` and `GET /api/reviews/{
 Run before finishing backend changes:
 
 ```bash
-dotnet build
+dotnet build -c Release
+dotnet test -c Release
 ```
 
 Local URLs:

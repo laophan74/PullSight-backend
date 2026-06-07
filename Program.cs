@@ -100,6 +100,7 @@ builder.Services.AddScoped<RuleBasedCodeReviewAnalyzer>();
 builder.Services.AddScoped<ReviewPersistenceService>();
 builder.Services.AddScoped<ReviewAnalysisOrchestrator>();
 builder.Services.AddScoped<ReviewHistoryService>();
+builder.Services.AddScoped<ReviewComparisonService>();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

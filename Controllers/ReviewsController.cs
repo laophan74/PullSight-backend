@@ -16,8 +16,42 @@ public sealed class ReviewsController(
     GitHubApiService gitHubApiService,
     ReviewAnalysisOrchestrator reviewAnalysisOrchestrator,
     ReviewHistoryService reviewHistoryService,
+    ReviewComparisonService reviewComparisonService,
     ILogger<ReviewsController> logger) : ControllerBase
 {
+    [Authorize]
+    [HttpPost("compare")]
+    public async Task<ActionResult<ReviewComparisonResponse>> CompareReviews(
+        CompareReviewsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await reviewComparisonService.CompareAsync(
+            githubUserId,
+            request.BaseReviewRunId,
+            request.TargetReviewRunId,
+            cancellationToken);
+
+        return result.Status switch
+        {
+            ReviewComparisonResultStatus.Success => Ok(result.Comparison),
+            ReviewComparisonResultStatus.NotFound => Problem(
+                title: "Review not found.",
+                detail: result.ErrorMessage,
+                statusCode: StatusCodes.Status404NotFound,
+                extensions: new Dictionary<string, object?> { ["code"] = result.ErrorCode }),
+            _ => Problem(
+                title: "Reviews cannot be compared.",
+                detail: result.ErrorMessage,
+                statusCode: StatusCodes.Status400BadRequest,
+                extensions: new Dictionary<string, object?> { ["code"] = result.ErrorCode }),
+        };
+    }
+
     [Authorize]
     [HttpGet]
     public async Task<ActionResult<ReviewHistoryPageResponse>> GetHistory(
