@@ -24,7 +24,7 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             user = new AppUser
             {
                 GitHubUserId = githubUserId,
-                Login = login,
+                Login = Truncate(login, 100),
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -32,7 +32,7 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         }
         else
         {
-            user.Login = login;
+            user.Login = Truncate(login, 100);
             user.UpdatedAt = now;
         }
 
@@ -46,9 +46,9 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             repository = new RepositoryRecord
             {
                 GitHubRepositoryId = pullRequestDiff.RepositoryId,
-                Owner = owner,
-                Name = name,
-                FullName = pullRequestDiff.RepositoryFullName,
+                Owner = Truncate(owner, 100),
+                Name = Truncate(name, 150),
+                FullName = Truncate(pullRequestDiff.RepositoryFullName, 260),
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -56,9 +56,9 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         }
         else
         {
-            repository.Owner = owner;
-            repository.Name = name;
-            repository.FullName = pullRequestDiff.RepositoryFullName;
+            repository.Owner = Truncate(owner, 100);
+            repository.Name = Truncate(name, 150);
+            repository.FullName = Truncate(pullRequestDiff.RepositoryFullName, 260);
             repository.UpdatedAt = now;
         }
 
@@ -74,8 +74,8 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             {
                 RepositoryId = repository.Id,
                 Number = pullRequestDiff.Number,
-                Title = pullRequestDiff.Title,
-                HeadSha = pullRequestDiff.HeadSha,
+                Title = Truncate(pullRequestDiff.Title, 500),
+                HeadSha = Truncate(pullRequestDiff.HeadSha, 80),
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -83,8 +83,8 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         }
         else
         {
-            pullRequest.Title = pullRequestDiff.Title;
-            pullRequest.HeadSha = pullRequestDiff.HeadSha;
+            pullRequest.Title = Truncate(pullRequestDiff.Title, 500);
+            pullRequest.HeadSha = Truncate(pullRequestDiff.HeadSha, 80);
             pullRequest.IsOpen = true;
             pullRequest.UpdatedAt = now;
         }
