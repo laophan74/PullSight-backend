@@ -132,22 +132,22 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             UserId = userId,
             RepositoryId = repositoryId,
             PullRequestNumber = review.PullRequestNumber,
-            HeadSha = review.HeadSha,
-            Analyzer = review.Analyzer,
-            Source = source,
-            Status = review.Status,
+            HeadSha = Truncate(review.HeadSha, 80),
+            Analyzer = Truncate(review.Analyzer, 80),
+            Source = Truncate(source, 40),
+            Status = Truncate(review.Status, 40),
             RiskScore = review.RiskScore,
-            Summary = review.Summary,
+            Summary = TruncateNullable(review.Summary, 4000),
             WasCached = false,
             CreatedAt = DateTimeOffset.UtcNow,
             Findings = review.Findings.Select(finding => new ReviewFinding
             {
-                Severity = finding.Severity,
-                Title = finding.Title,
-                FilePath = finding.FilePath,
+                Severity = Truncate(finding.Severity, 30),
+                Title = Truncate(finding.Title, 300),
+                FilePath = TruncateNullable(finding.FilePath, 600),
                 LineNumber = finding.Line,
-                RuleId = finding.Source,
-                Message = finding.Detail,
+                RuleId = TruncateNullable(finding.Source, 120),
+                Message = Truncate(finding.Detail, 4000),
                 CreatedAt = DateTimeOffset.UtcNow,
             }).ToList(),
         };
@@ -194,6 +194,16 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         return parts.Length == 2
             ? (parts[0], parts[1])
             : ("unknown", fullName);
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static string? TruncateNullable(string? value, int maxLength)
+    {
+        return value is null ? null : Truncate(value, maxLength);
     }
 }
 
