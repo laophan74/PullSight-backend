@@ -15,8 +15,11 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var normalizedLogin = Truncate(login, 100);
         var user = await dbContext.Users.FirstOrDefaultAsync(
-            existingUser => existingUser.GitHubUserId == githubUserId,
+            existingUser =>
+                existingUser.GitHubUserId == githubUserId
+                || existingUser.Login == normalizedLogin,
             cancellationToken);
 
         if (user is null)
@@ -24,7 +27,7 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             user = new AppUser
             {
                 GitHubUserId = githubUserId,
-                Login = Truncate(login, 100),
+                Login = normalizedLogin,
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -32,7 +35,8 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         }
         else
         {
-            user.Login = Truncate(login, 100);
+            user.GitHubUserId = githubUserId;
+            user.Login = normalizedLogin;
             user.UpdatedAt = now;
         }
 
