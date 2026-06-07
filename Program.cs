@@ -89,7 +89,6 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddScoped<RuleBasedCodeReviewAnalyzer>();
 builder.Services.AddScoped<ReviewPersistenceService>();
-builder.Services.AddScoped<ReviewQuotaService>();
 builder.Services.AddScoped<ReviewAnalysisOrchestrator>();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();

@@ -8,7 +8,6 @@ public sealed class ReviewAnalysisOrchestrator(
     GeminiCodeReviewAnalyzer geminiAnalyzer,
     RuleBasedCodeReviewAnalyzer fallbackAnalyzer,
     ReviewPersistenceService persistenceService,
-    ReviewQuotaService quotaService,
     ILogger<ReviewAnalysisOrchestrator> logger)
 {
     public async Task<ReviewRunResponse> AnalyzeAndPersistAsync(
@@ -29,17 +28,21 @@ public sealed class ReviewAnalysisOrchestrator(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(
-                exception,
-                "Review persistence/cache failed for {RepositoryName}#{PullRequestNumber}. Returning an uncached review.",
-                repositoryName,
-                pullRequestDiff.Number);
-
-            var reviewRun = await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
-
             var storageStage = exception is ReviewStorageException storageException
                 ? storageException.Stage
-                : null;
+                : "unknown";
+            var rootException = exception.GetBaseException();
+
+            logger.LogError(
+                exception,
+                "Review storage failed at {StorageStage} for {RepositoryName}#{PullRequestNumber}. Root error {RootErrorType}: {RootErrorMessage}. Returning an uncached review.",
+                storageStage,
+                repositoryName,
+                pullRequestDiff.Number,
+                rootException.GetType().Name,
+                rootException.Message);
+
+            var reviewRun = await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
 
             return WithStorageUnavailableSummary(reviewRun, storageStage);
         }
@@ -67,19 +70,15 @@ public sealed class ReviewAnalysisOrchestrator(
             throw new ReviewStorageException("ensure-context", exception);
         }
 
-        int quotaRemaining;
         ReviewRunResponse? cachedReview;
 
         try
         {
-            quotaRemaining = await quotaService.GetGeminiReviewsRemainingAsync(
-                context.UserId,
-                cancellationToken);
             cachedReview = await persistenceService.GetCachedReviewAsync(
                 context.RepositoryId,
                 pullRequestDiff.Number,
                 pullRequestDiff.HeadSha,
-                quotaRemaining,
+                0,
                 cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -102,32 +101,7 @@ public sealed class ReviewAnalysisOrchestrator(
                 context.UserId,
                 context.RepositoryId,
                 reviewRun,
-                quotaRemaining,
-                cancellationToken);
-        }
-
-        QuotaReservation reservation;
-
-        try
-        {
-            reservation = await quotaService.TryReserveGeminiReviewAsync(context.UserId, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new ReviewStorageException("quota-reserve", exception);
-        }
-
-        quotaRemaining = reservation.Remaining;
-
-        if (!reservation.WasReserved)
-        {
-            reviewRun = await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
-
-            return await SaveReviewAsync(
-                context.UserId,
-                context.RepositoryId,
-                WithQuotaSummary(reviewRun),
-                quotaRemaining,
+                0,
                 cancellationToken);
         }
 
@@ -146,7 +120,7 @@ public sealed class ReviewAnalysisOrchestrator(
             context.UserId,
             context.RepositoryId,
             reviewRun,
-            quotaRemaining,
+            0,
             cancellationToken);
     }
 
@@ -192,14 +166,6 @@ public sealed class ReviewAnalysisOrchestrator(
 
             return await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
         }
-    }
-
-    private static ReviewRunResponse WithQuotaSummary(ReviewRunResponse reviewRun)
-    {
-        return reviewRun with
-        {
-            Summary = $"{reviewRun.Summary} Gemini daily quota is exhausted, so PullSight used the rule-based fallback."
-        };
     }
 
     private static ReviewRunResponse WithStorageUnavailableSummary(

@@ -12,8 +12,7 @@ namespace PullSight.Api.Controllers;
 [Route("api/health")]
 public sealed class HealthController(
     PullSightDbContext dbContext,
-    ReviewPersistenceService reviewPersistenceService,
-    ReviewQuotaService reviewQuotaService) : ControllerBase
+    ReviewPersistenceService reviewPersistenceService) : ControllerBase
 {
     private static readonly string[] RequiredTables =
     [
@@ -239,16 +238,6 @@ public sealed class HealthController(
                 diff,
                 cancellationToken);
 
-            stage = "quota-read";
-            var quotaBefore = await reviewQuotaService.GetGeminiReviewsRemainingAsync(
-                context.UserId,
-                cancellationToken);
-
-            stage = "quota-reserve";
-            var quota = await reviewQuotaService.TryReserveGeminiReviewAsync(
-                context.UserId,
-                cancellationToken);
-
             stage = "save-review";
             var savedReview = await reviewPersistenceService.SaveReviewRunAsync(
                 context.UserId,
@@ -261,7 +250,7 @@ public sealed class HealthController(
                     "fallback",
                     "Diagnostics",
                     1,
-                    quota.Remaining,
+                    0,
                     DateTimeOffset.UtcNow,
                     "Rollback-only review flow diagnostic.",
                     [
@@ -274,7 +263,7 @@ public sealed class HealthController(
                             "Rollback-only review flow diagnostic finding.",
                             "rule"),
                     ]),
-                quota.Remaining,
+                0,
                 cancellationToken);
 
             await transaction.RollbackAsync(cancellationToken);
@@ -282,9 +271,6 @@ public sealed class HealthController(
             return Ok(new
             {
                 status = "healthy",
-                quotaBefore,
-                quotaReserved = quota.WasReserved,
-                quotaRemaining = quota.Remaining,
                 savedReviewStatus = savedReview.Status,
                 savedFindings = savedReview.Findings.Count,
                 rolledBack = true,

@@ -17,9 +17,11 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         var now = DateTimeOffset.UtcNow;
         var normalizedLogin = Truncate(login, 100);
         var user = await dbContext.Users.FirstOrDefaultAsync(
-            existingUser =>
-                existingUser.GitHubUserId == githubUserId
-                || existingUser.Login == normalizedLogin,
+            existingUser => existingUser.GitHubUserId == githubUserId,
+            cancellationToken);
+
+        user ??= await dbContext.Users.FirstOrDefaultAsync(
+            existingUser => EF.Functions.ILike(existingUser.Login, normalizedLogin),
             cancellationToken);
 
         if (user is null)
@@ -35,8 +37,6 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
         }
         else
         {
-            user.GitHubUserId = githubUserId;
-            user.Login = normalizedLogin;
             user.UpdatedAt = now;
         }
 
