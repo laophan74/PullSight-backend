@@ -15,8 +15,49 @@ public sealed class ReviewsController(
     RuleBasedCodeReviewAnalyzer demoAnalyzer,
     GitHubApiService gitHubApiService,
     ReviewAnalysisOrchestrator reviewAnalysisOrchestrator,
+    ReviewHistoryService reviewHistoryService,
     ILogger<ReviewsController> logger) : ControllerBase
 {
+    [Authorize]
+    [HttpGet]
+    public async Task<ActionResult<ReviewHistoryPageResponse>> GetHistory(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var reviews = await reviewHistoryService.GetReviewsAsync(
+            githubUserId,
+            page,
+            pageSize,
+            cancellationToken);
+
+        return Ok(reviews);
+    }
+
+    [Authorize]
+    [HttpGet("{reviewRunId:guid}")]
+    public async Task<ActionResult<ReviewHistoryDetailResponse>> GetHistoryDetail(
+        Guid reviewRunId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var review = await reviewHistoryService.GetReviewAsync(
+            githubUserId,
+            reviewRunId,
+            cancellationToken);
+
+        return review is null ? NotFound() : Ok(review);
+    }
+
     [HttpPost("demo")]
     public async Task<ActionResult<ReviewRunResponse>> AnalyzeDemo(CancellationToken cancellationToken)
     {
@@ -50,8 +91,7 @@ public sealed class ReviewsController(
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
-        var githubUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!long.TryParse(githubUserId, out var parsedGitHubUserId))
+        if (!TryGetGitHubUserId(out var parsedGitHubUserId))
         {
             return Problem(
                 title: "GitHub user id is missing.",
@@ -94,5 +134,10 @@ public sealed class ReviewsController(
         }
 
         return Ok(new PullRequestReviewResponse(reviewRun, diff));
+    }
+
+    private bool TryGetGitHubUserId(out long githubUserId)
+    {
+        return long.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out githubUserId);
     }
 }

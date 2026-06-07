@@ -33,6 +33,8 @@ ConnectionStrings__DefaultConnection=...
 
 Supabase Postgres is connected through EF Core + Npgsql. The backend accepts Supabase URI-style connection strings and normalizes them in `Program.cs`. EF Core migrations are committed under `Migrations/`. Startup migrations are opt-in with `Database__MigrateOnStartup=true`; keep this false on Render unless explicitly needed. Render should use the transaction pooler host `aws-1-ap-southeast-1.pooler.supabase.com:6543` with username `postgres.syshrmyuimqoitbpijea`.
 
+Review History is implemented through `GET /api/reviews` and `GET /api/reviews/{reviewRunId}`. Keep both endpoints cookie-authenticated and ownership-scoped through `ReviewHistoryService`.
+
 ## Standards
 
 - Use ASP.NET Core Web API.

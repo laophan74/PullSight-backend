@@ -67,6 +67,15 @@ This endpoint requires the auth cookie. It fetches the selected PR diff, checks 
 
 Analyzing the same PR head SHA again returns `status: cached`, does not call Gemini, and does not insert duplicate review rows.
 
+Review History endpoints:
+
+```text
+GET http://localhost:5200/api/reviews?page=1&pageSize=10
+GET http://localhost:5200/api/reviews/{reviewRunId}
+```
+
+Both require the auth cookie. The list is paginated, and both queries filter by the signed-in user's persisted ownership. A review id owned by another user returns `404`.
+
 Production health check:
 
 ```text
@@ -191,12 +200,11 @@ Implemented:
 - Rule-based fallback: return static findings when Gemini fails or the key is not configured.
 - Review persistence: store repositories, pull requests, review runs, and findings in Supabase Postgres.
 - Review cache: reuse saved results by repository + PR number + head SHA.
+- Review History: paginated user-scoped list and ownership-protected detail with findings.
 - Bounded database latency: return an uncached review when Supabase is temporarily unavailable instead of hanging the request.
 
 Next recommended backend feature:
 
-- Add a user-scoped, paginated Review History endpoint.
-- Return saved review summaries and finding counts.
-- Add a saved review detail endpoint or reusable response mapper for reopening a review.
+- Compare owned review runs across head SHAs for the same pull request.
 
 Daily Gemini quota tracking is deferred. The runtime does not read or write `usage_limits`.
