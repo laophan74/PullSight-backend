@@ -55,36 +55,24 @@ public sealed class ReviewAnalysisOrchestrator(
         GitHubPullRequestDiffResponse pullRequestDiff,
         CancellationToken cancellationToken)
     {
-        ReviewPersistenceContext context;
-
-        try
-        {
-            context = await persistenceService.EnsureContextAsync(
+        var context = await ExecuteStorageAsync(
+            "ensure-context",
+            token => persistenceService.EnsureContextAsync(
                 githubUserId,
                 login,
                 pullRequestDiff,
-                cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new ReviewStorageException("ensure-context", exception);
-        }
+                token),
+            cancellationToken);
 
-        ReviewRunResponse? cachedReview;
-
-        try
-        {
-            cachedReview = await persistenceService.GetCachedReviewAsync(
+        var cachedReview = await ExecuteStorageAsync(
+            "cache-read",
+            token => persistenceService.GetCachedReviewAsync(
                 context.RepositoryId,
                 pullRequestDiff.Number,
                 pullRequestDiff.HeadSha,
                 0,
-                cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new ReviewStorageException("cache-read", exception);
-        }
+                token),
+            cancellationToken);
 
         if (cachedReview is not null)
         {
@@ -131,19 +119,15 @@ public sealed class ReviewAnalysisOrchestrator(
         int quotaRemaining,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await persistenceService.SaveReviewRunAsync(
+        return await ExecuteStorageAsync(
+            "save-review",
+            token => persistenceService.SaveReviewRunAsync(
                 userId,
                 repositoryId,
                 reviewRun,
                 quotaRemaining,
-                cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            throw new ReviewStorageException("save-review", exception);
-        }
+                token),
+            cancellationToken);
     }
 
     private async Task<ReviewRunResponse> AnalyzeWithoutPersistenceAsync(
@@ -178,6 +162,30 @@ public sealed class ReviewAnalysisOrchestrator(
         {
             Summary = $"{reviewRun.Summary} Review storage is temporarily unavailable, so this result was not cached.{stageDetail}"
         };
+    }
+
+    private static async Task<T> ExecuteStorageAsync<T>(
+        string stage,
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+
+        try
+        {
+            return await operation(timeout.Token);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new ReviewStorageException(
+                stage,
+                new TimeoutException($"Review storage exceeded the 8 second budget during {stage}.", exception));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new ReviewStorageException(stage, exception);
+        }
     }
 
     private sealed class ReviewStorageException(string stage, Exception innerException)

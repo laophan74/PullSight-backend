@@ -41,10 +41,10 @@ builder.Services.AddDbContext<PullSightDbContext>(options =>
         ToNpgsqlConnectionString(connectionString),
         npgsqlOptions =>
         {
-            npgsqlOptions.CommandTimeout(60);
+            npgsqlOptions.CommandTimeout(10);
             npgsqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 3,
-                maxRetryDelay: TimeSpan.FromSeconds(3),
+                maxRetryCount: 1,
+                maxRetryDelay: TimeSpan.FromSeconds(1),
                 errorCodesToAdd: null);
         });
 });
@@ -148,9 +148,9 @@ static string ToNpgsqlConnectionString(string connectionString)
         Database = uri.AbsolutePath.TrimStart('/'),
         Username = Uri.UnescapeDataString(userInfo[0]),
         SslMode = SslMode.Require,
-        Timeout = 15,
-        CommandTimeout = 60,
-        KeepAlive = 30,
+        Timeout = 10,
+        CommandTimeout = 10,
+        Pooling = false,
     };
 
     if (userInfo.Length > 1)
