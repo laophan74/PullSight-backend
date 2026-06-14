@@ -10,6 +10,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="PullSight.Api.Tests" />
     <Compile Remove="PullSight.Api.Tests\**\*.cs" />
+    <Content Remove="PullSight.Api.Tests\**\*" />
+    <None Remove="PullSight.Api.Tests\**\*" />
   </ItemGroup>
 
   <ItemGroup>

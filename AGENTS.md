@@ -37,6 +37,8 @@ Review History is implemented through `GET /api/reviews` and `GET /api/reviews/{
 
 Compare Reviews is implemented through `POST /api/reviews/compare`. Keep ownership, same-PR validation, queries, and finding classification in `ReviewComparisonService`. Matching must use stable finding content identity rather than database IDs.
 
+Review History filters run through `ReviewHistoryService` before pagination. Saved review/comparison exports use `ReviewReportService`. GitHub PR publishing uses `ReviewPublishService` and `Services/GitHub/GitHubCommentService`; repository and PR context must come from persisted owned runs. Stable hidden markers provide idempotent comment updates without a migration.
+
 ## Standards
 
 - Use ASP.NET Core Web API.

@@ -6,24 +6,61 @@ namespace PullSight.Api.Services.ReviewAnalysis;
 
 public sealed class ReviewHistoryService(PullSightDbContext dbContext)
 {
-    public async Task<ReviewHistoryPageResponse> GetReviewsAsync(
+    public async Task<ReviewHistoryQueryResult> GetReviewsAsync(
         long githubUserId,
-        int page,
-        int pageSize,
+        ReviewHistoryQuery request,
         CancellationToken cancellationToken)
     {
-        var normalizedPage = Math.Max(page, 1);
-        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
+        if (request.PullRequestNumber is <= 0)
+        {
+            return ReviewHistoryQueryResult.Invalid(
+                "invalid_pull_request_number",
+                "Pull request number must be greater than zero.");
+        }
+
+        var normalizedPage = Math.Max(request.Page, 1);
+        var normalizedPageSize = Math.Clamp(request.PageSize, 1, 50);
         var userId = await GetUserIdAsync(githubUserId, cancellationToken);
 
         if (userId is null)
         {
-            return new ReviewHistoryPageResponse([], normalizedPage, normalizedPageSize, 0, 0);
+            return ReviewHistoryQueryResult.Success(
+                new ReviewHistoryPageResponse([], normalizedPage, normalizedPageSize, 0, 0));
         }
 
         var query = dbContext.ReviewRuns
             .AsNoTracking()
             .Where(run => run.UserId == userId.Value);
+
+        if (!string.IsNullOrWhiteSpace(request.Repository))
+        {
+            var repository = request.Repository.Trim().ToLower();
+            query = query.Where(run => run.Repository!.FullName.ToLower() == repository);
+        }
+
+        if (request.PullRequestNumber is not null)
+        {
+            query = query.Where(run => run.PullRequestNumber == request.PullRequestNumber.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.HeadSha))
+        {
+            var headSha = request.HeadSha.Trim().ToLower();
+            query = query.Where(run => run.HeadSha.ToLower().StartsWith(headSha));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Source))
+        {
+            var source = request.Source.Trim().ToLower();
+            query = query.Where(run => run.Source.ToLower() == source);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            var status = request.Status.Trim().ToLower();
+            query = query.Where(run => run.Status.ToLower() == status);
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
             .OrderByDescending(run => run.CreatedAt)
@@ -46,12 +83,13 @@ public sealed class ReviewHistoryService(PullSightDbContext dbContext)
             ? 0
             : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
 
-        return new ReviewHistoryPageResponse(
-            items,
-            normalizedPage,
-            normalizedPageSize,
-            totalCount,
-            totalPages);
+        return ReviewHistoryQueryResult.Success(
+            new ReviewHistoryPageResponse(
+                items,
+                normalizedPage,
+                normalizedPageSize,
+                totalCount,
+                totalPages));
     }
 
     public async Task<ReviewHistoryDetailResponse?> GetReviewAsync(
@@ -104,4 +142,18 @@ public sealed class ReviewHistoryService(PullSightDbContext dbContext)
             .Select(user => (Guid?)user.Id)
             .FirstOrDefaultAsync(cancellationToken);
     }
+}
+
+public sealed record ReviewHistoryQueryResult(
+    ReviewHistoryPageResponse? Page,
+    string? ErrorCode,
+    string? ErrorMessage)
+{
+    public bool IsSuccess => Page is not null;
+
+    public static ReviewHistoryQueryResult Success(ReviewHistoryPageResponse page) =>
+        new(page, null, null);
+
+    public static ReviewHistoryQueryResult Invalid(string errorCode, string errorMessage) =>
+        new(null, errorCode, errorMessage);
 }

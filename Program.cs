@@ -52,6 +52,7 @@ builder.Services.Configure<GitHubOAuthOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection("Gemini"));
 builder.Services.AddHttpClient<GitHubOAuthService>();
 builder.Services.AddHttpClient<GitHubApiService>();
+builder.Services.AddHttpClient<GitHubCommentService>();
 builder.Services.AddHttpClient<GeminiCodeReviewAnalyzer>();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -101,6 +102,8 @@ builder.Services.AddScoped<ReviewPersistenceService>();
 builder.Services.AddScoped<ReviewAnalysisOrchestrator>();
 builder.Services.AddScoped<ReviewHistoryService>();
 builder.Services.AddScoped<ReviewComparisonService>();
+builder.Services.AddScoped<ReviewReportService>();
+builder.Services.AddScoped<ReviewPublishService>();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

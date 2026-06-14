@@ -70,12 +70,16 @@ Analyzing the same PR head SHA again returns `status: cached`, does not call Gem
 Review History endpoints:
 
 ```text
-GET http://localhost:5200/api/reviews?page=1&pageSize=10
+GET http://localhost:5200/api/reviews?page=1&pageSize=10&repository=owner/repo&pullRequestNumber=10&headSha=abc&source=ai&status=completed
 GET http://localhost:5200/api/reviews/{reviewRunId}
 POST http://localhost:5200/api/reviews/compare
+GET http://localhost:5200/api/reviews/{reviewRunId}/export?format=markdown
+POST http://localhost:5200/api/reviews/compare/export
+POST http://localhost:5200/api/reviews/{reviewRunId}/publish
+POST http://localhost:5200/api/reviews/compare/publish
 ```
 
-Both require the auth cookie. The list is paginated, and both queries filter by the signed-in user's persisted ownership. A review id owned by another user returns `404`.
+All require the auth cookie. History filters run before count/pagination, and every operation enforces the signed-in user's persisted ownership. A review id owned by another user returns `404`.
 
 Compare request body:
 
@@ -87,6 +91,10 @@ Compare request body:
 ```
 
 The comparison endpoint requires two distinct owned runs from the same repository and pull request. It returns run metadata plus `added`, `resolved`, and `unchanged` finding groups. Finding identity uses normalized severity, path, line, title, and rule/source; database finding IDs are not used for matching.
+
+Export accepts `markdown` or `json`. Comparison export reuses the same ownership and same-PR comparison service.
+
+Publish uses the OAuth token stored in authentication properties and derives repository/PR context only from persisted review runs. Review comments include `<!-- pullsight-review:{reviewRunId} -->`; comparison comments include ordered base/target IDs. The GitHub service updates a matching comment or creates one when missing and truncates long comments below GitHub's API limit. No migration is required.
 
 Production health check:
 
@@ -214,10 +222,11 @@ Implemented:
 - Review cache: reuse saved results by repository + PR number + head SHA.
 - Review History: paginated user-scoped list and ownership-protected detail with findings.
 - Compare Reviews: ownership-protected same-PR comparison across head SHAs.
+- Review History Filters: user-scoped repository, PR, head SHA, source, and status filtering before pagination.
+- Export Reports: Markdown and JSON for saved reviews and comparisons.
+- Publish to GitHub: marker-based idempotent PR issue comments.
 - Bounded database latency: return an uncached review when Supabase is temporarily unavailable instead of hanging the request.
 
-Next recommended backend feature:
-
-- Add user-scoped repository and PR filters to Review History.
+Next recommended backend feature: optional GitHub check-run publishing or hosted share links.
 
 Daily Gemini quota tracking is deferred. The runtime does not read or write `usage_limits`.
