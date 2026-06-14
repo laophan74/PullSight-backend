@@ -26,21 +26,15 @@ public sealed class ReviewAnalysisOrchestrator(
                 pullRequestDiff,
                 cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (ReviewStorageException exception)
         {
-            var storageStage = exception is ReviewStorageException storageException
-                ? storageException.Stage
-                : "unknown";
-            var rootException = exception.GetBaseException();
-
+            var storageStage = exception.Stage;
             logger.LogError(
                 exception,
-                "Review storage failed at {StorageStage} for {RepositoryName}#{PullRequestNumber}. Root error {RootErrorType}: {RootErrorMessage}. Returning an uncached review.",
+                "Review storage failed at {StorageStage} for {RepositoryName}#{PullRequestNumber}. Returning an uncached review.",
                 storageStage,
                 repositoryName,
-                pullRequestDiff.Number,
-                rootException.GetType().Name,
-                rootException.Message);
+                pullRequestDiff.Number);
 
             var reviewRun = await AnalyzeWithoutPersistenceAsync(repositoryName, pullRequestDiff, cancellationToken);
 
@@ -67,6 +61,7 @@ public sealed class ReviewAnalysisOrchestrator(
         var cachedReview = await ExecuteStorageAsync(
             "cache-read",
             token => persistenceService.GetCachedReviewAsync(
+                context.UserId,
                 context.RepositoryId,
                 pullRequestDiff.Number,
                 pullRequestDiff.HeadSha,
@@ -79,55 +74,76 @@ public sealed class ReviewAnalysisOrchestrator(
             return cachedReview;
         }
 
-        ReviewRunResponse reviewRun;
-
-        if (!geminiAnalyzer.IsConfigured)
-        {
-            reviewRun = await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
-
-            return await SaveReviewAsync(
+        var queuedRun = await ExecuteStorageAsync(
+            "queue-review",
+            token => persistenceService.CreateQueuedReviewAsync(
                 context.UserId,
                 context.RepositoryId,
-                reviewRun,
-                0,
-                cancellationToken);
-        }
-
-        try
-        {
-            reviewRun = await geminiAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
-        }
-        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or JsonException)
-        {
-            logger.LogWarning(exception, "Gemini analysis failed. Falling back to rule-based analyzer.");
-
-            reviewRun = await fallbackAnalyzer.AnalyzeAsync(repositoryName, pullRequestDiff, cancellationToken);
-        }
-
-        return await SaveReviewAsync(
-            context.UserId,
-            context.RepositoryId,
-            reviewRun,
-            0,
-            cancellationToken);
-    }
-
-    private async Task<ReviewRunResponse> SaveReviewAsync(
-        Guid userId,
-        Guid repositoryId,
-        ReviewRunResponse reviewRun,
-        int quotaRemaining,
-        CancellationToken cancellationToken)
-    {
-        return await ExecuteStorageAsync(
-            "save-review",
-            token => persistenceService.SaveReviewRunAsync(
-                userId,
-                repositoryId,
-                reviewRun,
-                quotaRemaining,
+                repositoryName,
+                pullRequestDiff,
                 token),
             cancellationToken);
+        await ExecuteStorageAsync(
+            "start-review",
+            async token =>
+            {
+                await persistenceService.SetAnalyzingAsync(queuedRun.Id, token);
+                return true;
+            },
+            cancellationToken);
+
+        ReviewRunResponse reviewRun;
+        try
+        {
+            if (!geminiAnalyzer.IsConfigured)
+            {
+                reviewRun = await fallbackAnalyzer.AnalyzeAsync(
+                    repositoryName,
+                    pullRequestDiff,
+                    cancellationToken);
+            }
+            else
+            {
+                try
+                {
+                    reviewRun = await geminiAnalyzer.AnalyzeAsync(
+                        repositoryName,
+                        pullRequestDiff,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (
+                    exception is HttpRequestException or InvalidOperationException or JsonException)
+                {
+                    logger.LogWarning(exception, "Gemini analysis failed. Falling back to rule-based analyzer.");
+                    reviewRun = await fallbackAnalyzer.AnalyzeAsync(
+                        repositoryName,
+                        pullRequestDiff,
+                        cancellationToken);
+                }
+            }
+
+            return await ExecuteStorageAsync(
+                "complete-review",
+                token => persistenceService.CompleteReviewAsync(
+                    queuedRun.Id,
+                    reviewRun,
+                    0,
+                    token),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            var safeError = ReviewRunPolicy.SanitizeError(exception);
+            await ExecuteStorageAsync(
+                "fail-review",
+                async token =>
+                {
+                    await persistenceService.MarkFailedAsync(queuedRun.Id, safeError, token);
+                    return true;
+                },
+                cancellationToken);
+            throw;
+        }
     }
 
     private async Task<ReviewRunResponse> AnalyzeWithoutPersistenceAsync(
@@ -160,7 +176,11 @@ public sealed class ReviewAnalysisOrchestrator(
 
         return reviewRun with
         {
-            Summary = $"{reviewRun.Summary} Review storage is temporarily unavailable, so this result was not cached.{stageDetail}"
+            Summary = $"{reviewRun.Summary} Review storage is temporarily unavailable, so this result was not cached.{stageDetail}",
+            SummaryDetails = reviewRun.SummaryDetails with
+            {
+                Overview = $"{reviewRun.SummaryDetails.Overview} Review storage is temporarily unavailable, so this result was not cached.{stageDetail}"
+            }
         };
     }
 

@@ -11,4 +11,6 @@ public sealed record ReviewRunResponse(
     int QuotaRemaining,
     DateTimeOffset CreatedAt,
     string Summary,
+    ReviewSummaryResponse SummaryDetails,
+    string? ErrorMessage,
     IReadOnlyList<ReviewFindingResponse> Findings);

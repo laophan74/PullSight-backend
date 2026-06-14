@@ -39,6 +39,12 @@ Compare Reviews is implemented through `POST /api/reviews/compare`. Keep ownersh
 
 Review History filters run through `ReviewHistoryService` before pagination. Saved review/comparison exports use `ReviewReportService`. GitHub PR publishing uses `ReviewPublishService` and `Services/GitHub/GitHubCommentService`; repository and PR context must come from persisted owned runs. Stable hidden markers provide idempotent comment updates without a migration.
 
+Review runs use `queued`, `analyzing`, `completed`, `fallback`, and `failed`. Keep lifecycle writes in persistence/orchestration services and sanitize failed errors. Structured summaries use overview, risk overview, key changes, and suggested test plan.
+
+Check Run and inline publishing use `ReviewGitHubPublishService`. Only completed/fallback owned runs are eligible. Check Runs use `external_id = pullsight:{reviewRunId}`. Inline comments require the persisted head to remain current and the finding line to be an added right-side diff line; markers use stable content identity rather than finding database IDs.
+
+Migration `AddReviewLifecycleSummary` adds only nullable summary JSON and error columns. Do not enable Render startup migrations.
+
 ## Standards
 
 - Use ASP.NET Core Web API.

@@ -7,4 +7,6 @@ public sealed record ReviewFindingResponse(
     int Line,
     string Title,
     string Detail,
-    string Source);
+    string Source,
+    string? Suggestion = null,
+    bool IsInlineCommentable = true);

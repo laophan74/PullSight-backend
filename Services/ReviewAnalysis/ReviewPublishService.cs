@@ -31,6 +31,13 @@ public sealed class ReviewPublishService(
             return ReviewPublishResult.NotFound();
         }
 
+        if (!ReviewRunPolicy.IsCompleted(review.Status))
+        {
+            return ReviewPublishResult.Invalid(
+                "review_not_completed",
+                "Only completed or fallback reviews can be published.");
+        }
+
         var marker = $"<!-- pullsight-review:{review.Id} -->";
         var body = ReviewReportService.BuildReviewComment(review, marker);
         return await PublishAsync(

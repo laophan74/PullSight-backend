@@ -54,6 +54,20 @@ public sealed class ReviewPublishServiceTests
     }
 
     [Fact]
+    public async Task PublishReviewAsync_RejectsIncompleteReview()
+    {
+        var setup = await CreateSetupAsync(baseStatus: "analyzing");
+        var result = await setup.Service.PublishReviewAsync(
+            setup.User.GitHubUserId,
+            setup.BaseRun.Id,
+            "token",
+            CancellationToken.None);
+
+        Assert.Equal("review_not_completed", result.ErrorCode);
+        Assert.Equal(0, setup.Handler.CallCount);
+    }
+
+    [Fact]
     public async Task PublishReviewAsync_MapsGitHubApiFailure()
     {
         var setup = await CreateSetupAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError));
@@ -68,12 +82,13 @@ public sealed class ReviewPublishServiceTests
 
     private static async Task<PublishSetup> CreateSetupAsync(
         HttpResponseMessage? response = null,
-        int targetPullRequestNumber = 12)
+        int targetPullRequestNumber = 12,
+        string baseStatus = "completed")
     {
         var db = TestData.CreateDbContext();
         var user = TestData.CreateUser(1001);
         var repository = TestData.CreateRepository();
-        var baseRun = TestData.CreateRun(user, repository, 12, "base123");
+        var baseRun = TestData.CreateRun(user, repository, 12, "base123", status: baseStatus);
         var targetRun = TestData.CreateRun(user, repository, targetPullRequestNumber, "target123");
         baseRun.Findings.Add(TestData.CreateFinding());
         db.AddRange(user, repository, baseRun, targetRun);

@@ -4,8 +4,15 @@ using PullSight.Api.Data;
 
 namespace PullSight.Api.Services.ReviewAnalysis;
 
-public sealed class ReviewHistoryService(PullSightDbContext dbContext)
+public sealed class ReviewHistoryService(
+    PullSightDbContext dbContext,
+    ReviewSummaryService summaryService)
 {
+    public ReviewHistoryService(PullSightDbContext dbContext)
+        : this(dbContext, new ReviewSummaryService())
+    {
+    }
+
     public async Task<ReviewHistoryQueryResult> GetReviewsAsync(
         long githubUserId,
         ReviewHistoryQuery request,
@@ -16,6 +23,14 @@ public sealed class ReviewHistoryService(PullSightDbContext dbContext)
             return ReviewHistoryQueryResult.Invalid(
                 "invalid_pull_request_number",
                 "Pull request number must be greater than zero.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Status)
+            && !ReviewRunPolicy.KnownStatuses.Contains(request.Status.Trim()))
+        {
+            return ReviewHistoryQueryResult.Invalid(
+                "invalid_review_status",
+                "Status must be queued, analyzing, completed, fallback, or failed.");
         }
 
         var normalizedPage = Math.Max(request.Page, 1);
@@ -62,23 +77,41 @@ public sealed class ReviewHistoryService(PullSightDbContext dbContext)
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
-        var items = await query
+        var rows = await query
             .OrderByDescending(run => run.CreatedAt)
             .Skip((normalizedPage - 1) * normalizedPageSize)
             .Take(normalizedPageSize)
-            .Select(run => new ReviewHistoryItemResponse(
-                run.Id.ToString("N"),
-                run.Repository!.FullName,
+            .Select(run => new
+            {
+                Id = run.Id.ToString("N"),
+                RepositoryFullName = run.Repository!.FullName,
                 run.PullRequestNumber,
                 run.HeadSha,
                 run.Status,
                 run.Source,
                 run.Analyzer,
                 run.RiskScore,
-                run.Summary ?? "Review completed.",
-                run.Findings.Count,
-                run.CreatedAt))
+                Summary = run.Summary ?? "Review completed.",
+                run.SummaryDetailsJson,
+                run.ErrorMessage,
+                FindingCount = run.Findings.Count,
+                run.CreatedAt,
+            })
             .ToListAsync(cancellationToken);
+        var items = rows.Select(run => new ReviewHistoryItemResponse(
+            run.Id,
+            run.RepositoryFullName,
+            run.PullRequestNumber,
+            run.HeadSha,
+            run.Status,
+            run.Source,
+            run.Analyzer,
+            run.RiskScore,
+            run.Summary,
+            summaryService.FromStored(run.SummaryDetailsJson, run.Summary),
+            run.ErrorMessage,
+            run.FindingCount,
+            run.CreatedAt)).ToList();
         var totalPages = totalCount == 0
             ? 0
             : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
@@ -103,33 +136,46 @@ public sealed class ReviewHistoryService(PullSightDbContext dbContext)
             return null;
         }
 
-        return await dbContext.ReviewRuns
+        var run = await dbContext.ReviewRuns
             .AsNoTracking()
+            .Include(reviewRun => reviewRun.Repository)
+            .Include(reviewRun => reviewRun.Findings)
             .Where(run => run.Id == reviewRunId && run.UserId == userId.Value)
-            .Select(run => new ReviewHistoryDetailResponse(
-                run.Id.ToString("N"),
-                run.Repository!.FullName,
-                run.PullRequestNumber,
-                run.HeadSha,
-                run.Status,
-                run.Source,
-                run.Analyzer,
-                run.RiskScore,
-                run.Summary ?? "Review completed.",
-                run.Findings.Count,
-                run.CreatedAt,
-                run.Findings
-                    .OrderBy(finding => finding.CreatedAt)
-                    .Select(finding => new ReviewFindingResponse(
-                        finding.Id.ToString("N"),
-                        finding.Severity,
-                        finding.FilePath ?? "pull-request",
-                        finding.LineNumber ?? 1,
-                        finding.Title,
-                        finding.Message,
-                        finding.RuleId ?? run.Source))
-                    .ToList()))
             .FirstOrDefaultAsync(cancellationToken);
+
+        if (run is null)
+        {
+            return null;
+        }
+
+        var summary = run.Summary ?? "Review completed.";
+        return new ReviewHistoryDetailResponse(
+            run.Id.ToString("N"),
+            run.Repository!.FullName,
+            run.PullRequestNumber,
+            run.HeadSha,
+            run.Status,
+            run.Source,
+            run.Analyzer,
+            run.RiskScore,
+            summary,
+            summaryService.FromStored(run.SummaryDetailsJson, summary),
+            run.ErrorMessage,
+            run.Findings.Count,
+            run.CreatedAt,
+            run.Findings
+                .OrderBy(finding => finding.CreatedAt)
+                .Select(finding => new ReviewFindingResponse(
+                    finding.Id.ToString("N"),
+                    finding.Severity,
+                    finding.FilePath ?? "pull-request",
+                    finding.LineNumber ?? 1,
+                    finding.Title,
+                    finding.Message,
+                    finding.RuleId ?? run.Source,
+                    finding.Suggestion,
+                    finding.FilePath is not null && finding.LineNumber is > 0))
+                .ToList());
     }
 
     private async Task<Guid?> GetUserIdAsync(

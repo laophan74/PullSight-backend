@@ -238,10 +238,23 @@ public sealed class HealthController(
                 diff,
                 cancellationToken);
 
-            stage = "save-review";
-            var savedReview = await reviewPersistenceService.SaveReviewRunAsync(
+            stage = "queue-review";
+            var queuedReview = await reviewPersistenceService.CreateQueuedReviewAsync(
                 context.UserId,
                 context.RepositoryId,
+                diff.RepositoryFullName,
+                diff,
+                cancellationToken);
+            await reviewPersistenceService.SetAnalyzingAsync(queuedReview.Id, cancellationToken);
+
+            stage = "complete-review";
+            var diagnosticSummary = new ReviewSummaryResponse(
+                "Rollback-only review flow diagnostic.",
+                "Low-risk database diagnostic.",
+                ["Created a rollback-only diagnostics review."],
+                ["Confirm the transaction rolls back."]);
+            var savedReview = await reviewPersistenceService.CompleteReviewAsync(
+                queuedReview.Id,
                 new ReviewRunResponse(
                     Guid.NewGuid().ToString("N"),
                     diff.RepositoryFullName,
@@ -252,7 +265,9 @@ public sealed class HealthController(
                     1,
                     0,
                     DateTimeOffset.UtcNow,
-                    "Rollback-only review flow diagnostic.",
+                    diagnosticSummary.Overview,
+                    diagnosticSummary,
+                    null,
                     [
                         new ReviewFindingResponse(
                             Guid.NewGuid().ToString("N"),

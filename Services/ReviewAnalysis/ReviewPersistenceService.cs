@@ -6,8 +6,15 @@ using PullSight.Api.Data.Entities;
 
 namespace PullSight.Api.Services.ReviewAnalysis;
 
-public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
+public sealed class ReviewPersistenceService(
+    PullSightDbContext dbContext,
+    ReviewSummaryService summaryService)
 {
+    public ReviewPersistenceService(PullSightDbContext dbContext)
+        : this(dbContext, new ReviewSummaryService())
+    {
+    }
+
     public async Task<ReviewPersistenceContext> EnsureContextAsync(
         long githubUserId,
         string login,
@@ -99,6 +106,7 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
     }
 
     public async Task<ReviewRunResponse?> GetCachedReviewAsync(
+        Guid userId,
         Guid repositoryId,
         int pullRequestNumber,
         string headSha,
@@ -111,6 +119,7 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             .Include(run => run.Findings.OrderBy(finding => finding.CreatedAt))
             .Where(run =>
                 run.RepositoryId == repositoryId
+                && run.UserId == userId
                 && run.PullRequestNumber == pullRequestNumber
                 && run.HeadSha == headSha
                 && (run.Status == "completed" || run.Status == "fallback"))
@@ -122,53 +131,111 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             : ToResponse(reviewRun, "cached", quotaRemaining);
     }
 
-    public async Task<ReviewRunResponse> SaveReviewRunAsync(
+    public async Task<ReviewRun> CreateQueuedReviewAsync(
         Guid userId,
         Guid repositoryId,
-        ReviewRunResponse review,
-        int quotaRemaining,
+        string repositoryName,
+        GitHubPullRequestDiffResponse diff,
         CancellationToken cancellationToken)
     {
-        var source = review.Findings.FirstOrDefault()?.Source
-            ?? (review.Status == "completed" ? "ai" : "rule");
         var reviewRun = new ReviewRun
         {
             UserId = userId,
             RepositoryId = repositoryId,
-            PullRequestNumber = review.PullRequestNumber,
-            HeadSha = Truncate(review.HeadSha, 80),
-            Analyzer = Truncate(review.Analyzer, 80),
-            Source = Truncate(source, 40),
-            Status = Truncate(review.Status, 40),
-            RiskScore = review.RiskScore,
-            Summary = TruncateNullable(review.Summary, 4000),
+            PullRequestNumber = diff.Number,
+            HeadSha = Truncate(diff.HeadSha, 80),
+            Analyzer = "pending",
+            Source = "pending",
+            Status = "queued",
+            RiskScore = 0,
+            Summary = $"Review queued for {Truncate(repositoryName, 260)}.",
             WasCached = false,
             CreatedAt = DateTimeOffset.UtcNow,
-            Findings = review.Findings.Select(finding => new ReviewFinding
-            {
-                Severity = Truncate(finding.Severity, 30),
-                Title = Truncate(finding.Title, 300),
-                FilePath = TruncateNullable(finding.FilePath, 600),
-                LineNumber = finding.Line,
-                RuleId = TruncateNullable(finding.Source, 120),
-                Message = Truncate(finding.Detail, 4000),
-                CreatedAt = DateTimeOffset.UtcNow,
-            }).ToList(),
         };
 
         dbContext.ReviewRuns.Add(reviewRun);
         await dbContext.SaveChangesAsync(cancellationToken);
-        await dbContext.Entry(reviewRun).Reference(run => run.Repository).LoadAsync(cancellationToken);
+        return reviewRun;
+    }
+
+    public async Task SetAnalyzingAsync(Guid reviewRunId, CancellationToken cancellationToken)
+    {
+        var reviewRun = await dbContext.ReviewRuns.FindAsync([reviewRunId], cancellationToken)
+            ?? throw new InvalidOperationException("Queued review run was not found.");
+        reviewRun.Status = "analyzing";
+        reviewRun.Summary = "PullSight is analyzing the pull request.";
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<ReviewRunResponse> CompleteReviewAsync(
+        Guid reviewRunId,
+        ReviewRunResponse review,
+        int quotaRemaining,
+        CancellationToken cancellationToken)
+    {
+        var reviewRun = await dbContext.ReviewRuns
+            .Include(run => run.Repository)
+            .Include(run => run.Findings)
+            .FirstOrDefaultAsync(run => run.Id == reviewRunId, cancellationToken)
+            ?? throw new InvalidOperationException("Queued review run was not found.");
+        var normalizedSummary = summaryService.Normalize(
+            review.SummaryDetails,
+            review.Summary,
+            findings: review.Findings);
+
+        reviewRun.Analyzer = Truncate(review.Analyzer, 80);
+        reviewRun.Source = Truncate(
+            review.Findings.FirstOrDefault()?.Source
+                ?? (review.Status == "completed" ? "ai" : "rule"),
+            40);
+        reviewRun.Status = ReviewRunPolicy.IsCompleted(review.Status) ? review.Status : "completed";
+        reviewRun.RiskScore = Math.Clamp(review.RiskScore, 0, 100);
+        reviewRun.Summary = Truncate(normalizedSummary.Overview, 4000);
+        reviewRun.SummaryDetailsJson = summaryService.Serialize(normalizedSummary);
+        reviewRun.ErrorMessage = null;
+        reviewRun.Findings.AddRange(review.Findings.Select(finding => new ReviewFinding
+        {
+            Severity = Truncate(finding.Severity, 30),
+            Title = Truncate(finding.Title, 300),
+            FilePath = IsRealFilePath(finding.FilePath) ? Truncate(finding.FilePath, 600) : null,
+            LineNumber = finding.Line > 0 ? finding.Line : null,
+            RuleId = TruncateNullable(finding.Source, 120),
+            Message = Truncate(finding.Detail, 4000),
+            Suggestion = TruncateNullable(finding.Suggestion, 4000),
+            CreatedAt = DateTimeOffset.UtcNow,
+        }));
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return ToResponse(reviewRun, reviewRun.Status, quotaRemaining);
     }
 
-    private static ReviewRunResponse ToResponse(
+    public async Task MarkFailedAsync(
+        Guid reviewRunId,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        var reviewRun = await dbContext.ReviewRuns.FindAsync([reviewRunId], cancellationToken);
+        if (reviewRun is null)
+        {
+            return;
+        }
+
+        reviewRun.Status = "failed";
+        reviewRun.Source = "system";
+        reviewRun.Analyzer = "unavailable";
+        reviewRun.ErrorMessage = Truncate(errorMessage, 1000);
+        reviewRun.Summary = "Review failed before analysis completed.";
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private ReviewRunResponse ToResponse(
         ReviewRun reviewRun,
         string status,
         int quotaRemaining)
     {
         var repositoryName = reviewRun.Repository?.FullName ?? "unknown/repository";
+        var legacySummary = reviewRun.Summary ?? "Review completed.";
+        var summaryDetails = summaryService.FromStored(reviewRun.SummaryDetailsJson, legacySummary);
 
         return new ReviewRunResponse(
             reviewRun.Id.ToString("N"),
@@ -180,7 +247,9 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
             reviewRun.RiskScore,
             quotaRemaining,
             reviewRun.CreatedAt,
-            reviewRun.Summary ?? "Review completed.",
+            legacySummary,
+            summaryDetails,
+            reviewRun.ErrorMessage,
             reviewRun.Findings.Select(finding => new ReviewFindingResponse(
                 finding.Id.ToString("N"),
                 finding.Severity,
@@ -188,7 +257,9 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
                 finding.LineNumber ?? 1,
                 finding.Title,
                 finding.Message,
-                finding.RuleId ?? reviewRun.Source)).ToList());
+                finding.RuleId ?? reviewRun.Source,
+                finding.Suggestion,
+                finding.FilePath is not null && finding.LineNumber is > 0)).ToList());
     }
 
     private static (string Owner, string Name) SplitFullName(string fullName)
@@ -209,6 +280,10 @@ public sealed class ReviewPersistenceService(PullSightDbContext dbContext)
     {
         return value is null ? null : Truncate(value, maxLength);
     }
+
+    private static bool IsRealFilePath(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && !string.Equals(value, "pull-request", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record ReviewPersistenceContext(

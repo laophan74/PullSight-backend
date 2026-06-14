@@ -22,6 +22,10 @@ public sealed class ReviewRun
 
     public string? Summary { get; set; }
 
+    public string? SummaryDetailsJson { get; set; }
+
+    public string? ErrorMessage { get; set; }
+
     public bool WasCached { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

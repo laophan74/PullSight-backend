@@ -17,5 +17,7 @@ public sealed record ReviewComparisonRunResponse(
     string Analyzer,
     int RiskScore,
     string Summary,
+    ReviewSummaryResponse SummaryDetails,
+    string? ErrorMessage,
     int FindingCount,
     DateTimeOffset CreatedAt);

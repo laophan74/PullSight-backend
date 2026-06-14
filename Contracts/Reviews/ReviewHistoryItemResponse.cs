@@ -10,5 +10,7 @@ public sealed record ReviewHistoryItemResponse(
     string Analyzer,
     int RiskScore,
     string Summary,
+    ReviewSummaryResponse SummaryDetails,
+    string? ErrorMessage,
     int FindingCount,
     DateTimeOffset CreatedAt);

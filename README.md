@@ -77,6 +77,9 @@ GET http://localhost:5200/api/reviews/{reviewRunId}/export?format=markdown
 POST http://localhost:5200/api/reviews/compare/export
 POST http://localhost:5200/api/reviews/{reviewRunId}/publish
 POST http://localhost:5200/api/reviews/compare/publish
+POST http://localhost:5200/api/reviews/{reviewRunId}/retry
+POST http://localhost:5200/api/reviews/{reviewRunId}/check-run
+POST http://localhost:5200/api/reviews/{reviewRunId}/inline-comments
 ```
 
 All require the auth cookie. History filters run before count/pagination, and every operation enforces the signed-in user's persisted ownership. A review id owned by another user returns `404`.
@@ -95,6 +98,14 @@ The comparison endpoint requires two distinct owned runs from the same repositor
 Export accepts `markdown` or `json`. Comparison export reuses the same ownership and same-PR comparison service.
 
 Publish uses the OAuth token stored in authentication properties and derives repository/PR context only from persisted review runs. Review comments include `<!-- pullsight-review:{reviewRunId} -->`; comparison comments include ordered base/target IDs. The GitHub service updates a matching comment or creates one when missing and truncates long comments below GitHub's API limit. No migration is required.
+
+Review processing remains synchronous but persists `queued`, then `analyzing`, then `completed`, `fallback`, or `failed`. Failed errors are sanitized. Only completed/fallback runs can compare, export, or publish.
+
+The summary contract contains `overview`, `riskOverview`, `keyChanges`, and `suggestedTestPlan`. Gemini returns this JSON shape; malformed summary blocks fall back without discarding valid findings.
+
+Check Runs use `external_id = pullsight:{reviewRunId}` and update a matching run. Conclusions are `failure` for critical/high findings, `neutral` for medium findings, and `success` otherwise. Annotations are limited to valid changed lines and GitHub's 50-annotation request limit.
+
+Inline comments validate the current PR head and added right-side diff lines. Markers use `<!-- pullsight-inline:{reviewRunId}:{stableFindingIdentity} -->`; publishing returns created, updated, already-published, skipped, and failed counts.
 
 Production health check:
 
@@ -160,6 +171,8 @@ dotnet ef migrations add MigrationName
 dotnet ef database update
 ```
 
+`AddReviewLifecycleSummary` adds nullable `SummaryDetailsJson` and `ErrorMessage` columns. Apply it as a controlled migration before deploying this version; do not enable startup migrations on Render.
+
 Keep Render startup independent from the database unless you intentionally need automatic migrations. Automatic startup migrations are opt-in:
 
 ```text
@@ -224,9 +237,9 @@ Implemented:
 - Compare Reviews: ownership-protected same-PR comparison across head SHAs.
 - Review History Filters: user-scoped repository, PR, head SHA, source, and status filtering before pagination.
 - Export Reports: Markdown and JSON for saved reviews and comparisons.
-- Publish to GitHub: marker-based idempotent PR issue comments.
+- Publish to GitHub: marker-based idempotent PR issue comments, Check Runs, and inline review comments.
 - Bounded database latency: return an uncached review when Supabase is temporarily unavailable instead of hanging the request.
 
-Next recommended backend feature: optional GitHub check-run publishing or hosted share links.
+Next recommended backend feature: webhook-triggered reviews or hosted share links.
 
 Daily Gemini quota tracking is deferred. The runtime does not read or write `usage_limits`.

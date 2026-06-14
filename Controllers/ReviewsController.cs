@@ -19,6 +19,7 @@ public sealed class ReviewsController(
     ReviewComparisonService reviewComparisonService,
     ReviewReportService reviewReportService,
     ReviewPublishService reviewPublishService,
+    ReviewGitHubPublishService reviewGitHubPublishService,
     ILogger<ReviewsController> logger) : ControllerBase
 {
     [Authorize]
@@ -117,6 +118,129 @@ public sealed class ReviewsController(
             cancellationToken);
 
         return ToExportResult(result);
+    }
+
+    [Authorize]
+    [HttpPost("{reviewRunId:guid}/check-run")]
+    public async Task<ActionResult<CheckRunPublishResponse>> PublishCheckRun(
+        Guid reviewRunId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var accessToken = await HttpContext.GetTokenAsync("access_token") ?? string.Empty;
+        var result = await reviewGitHubPublishService.PublishCheckRunAsync(
+            githubUserId,
+            reviewRunId,
+            accessToken,
+            cancellationToken);
+        return result.IsSuccess
+            ? Ok(result.Response)
+            : TypedGitHubPublishProblem(result.ErrorCode!, result.ErrorMessage!);
+    }
+
+    [Authorize]
+    [HttpPost("{reviewRunId:guid}/inline-comments")]
+    public async Task<ActionResult<InlineCommentsPublishResponse>> PublishInlineComments(
+        Guid reviewRunId,
+        InlineCommentsPublishRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var accessToken = await HttpContext.GetTokenAsync("access_token") ?? string.Empty;
+        var result = await reviewGitHubPublishService.PublishInlineCommentsAsync(
+            githubUserId,
+            reviewRunId,
+            request,
+            accessToken,
+            cancellationToken);
+        return result.IsSuccess
+            ? Ok(result.Response)
+            : TypedGitHubPublishProblem(result.ErrorCode!, result.ErrorMessage!);
+    }
+
+    [Authorize]
+    [HttpPost("{reviewRunId:guid}/retry")]
+    public async Task<ActionResult<PullRequestReviewResponse>> RetryReview(
+        Guid reviewRunId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetGitHubUserId(out var githubUserId))
+        {
+            return Unauthorized();
+        }
+
+        var review = await reviewHistoryService.GetReviewAsync(
+            githubUserId,
+            reviewRunId,
+            cancellationToken);
+        if (review is null)
+        {
+            return TypedProblem(
+                "Review not found.",
+                "The review run was not found.",
+                StatusCodes.Status404NotFound,
+                "review_not_found");
+        }
+
+        if (review.Status != "failed")
+        {
+            return TypedProblem(
+                "Review cannot be retried.",
+                "Only failed review runs can be retried.",
+                StatusCodes.Status409Conflict,
+                "review_not_failed");
+        }
+
+        var repository = review.RepositoryFullName.Split('/', 2);
+        if (repository.Length != 2)
+        {
+            return TypedGitHubPublishProblem(
+                "github_repository_unavailable",
+                "The persisted repository is invalid.");
+        }
+
+        var accessToken = await HttpContext.GetTokenAsync("access_token");
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return TypedGitHubPublishProblem(
+                "github_token_missing",
+                "Log in with GitHub again before retrying this review.");
+        }
+
+        try
+        {
+            var diff = await gitHubApiService.GetPullRequestDiffAsync(
+                repository[0],
+                repository[1],
+                review.PullRequestNumber,
+                accessToken,
+                cancellationToken);
+            var login = User.FindFirstValue("github:login") ?? User.Identity?.Name ?? "github-user";
+            var reviewRun = await reviewAnalysisOrchestrator.AnalyzeAndPersistAsync(
+                githubUserId,
+                login,
+                review.RepositoryFullName,
+                diff,
+                cancellationToken);
+            return Ok(new PullRequestReviewResponse(reviewRun, diff));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(exception, "Failed to retry review {ReviewRunId}.", reviewRunId);
+            return TypedProblem(
+                "Unable to retry review.",
+                "PullSight could not complete the retry.",
+                StatusCodes.Status500InternalServerError,
+                "review_retry_failed");
+        }
     }
 
     [Authorize]
@@ -311,6 +435,7 @@ public sealed class ReviewsController(
             "review_not_found" => StatusCodes.Status404NotFound,
             "reviews_not_same_pull_request" => StatusCodes.Status400BadRequest,
             "github_repository_unavailable" => StatusCodes.Status404NotFound,
+            "review_not_completed" => StatusCodes.Status409Conflict,
             "github_comment_failed" => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status400BadRequest,
         };
@@ -320,6 +445,20 @@ public sealed class ReviewsController(
             result.ErrorMessage!,
             statusCode,
             result.ErrorCode!);
+    }
+
+    private ObjectResult TypedGitHubPublishProblem(string code, string detail)
+    {
+        var statusCode = code switch
+        {
+            "review_not_found" or "finding_not_found" => StatusCodes.Status404NotFound,
+            "review_not_completed" or "review_head_outdated" => StatusCodes.Status409Conflict,
+            "github_token_missing" => StatusCodes.Status401Unauthorized,
+            "github_repository_unavailable" => StatusCodes.Status404NotFound,
+            "github_check_failed" or "github_inline_comment_failed" => StatusCodes.Status502BadGateway,
+            _ => StatusCodes.Status400BadRequest,
+        };
+        return TypedProblem("Unable to publish to GitHub.", detail, statusCode, code);
     }
 
     private ObjectResult TypedProblem(string title, string detail, int statusCode, string code)

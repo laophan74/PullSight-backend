@@ -89,6 +89,8 @@ public sealed class PullSightDbContext(DbContextOptions<PullSightDbContext> opti
             entity.Property(reviewRun => reviewRun.Source).HasMaxLength(40);
             entity.Property(reviewRun => reviewRun.Status).HasMaxLength(40);
             entity.Property(reviewRun => reviewRun.Summary).HasMaxLength(4000);
+            entity.Property(reviewRun => reviewRun.SummaryDetailsJson).HasColumnType("jsonb");
+            entity.Property(reviewRun => reviewRun.ErrorMessage).HasMaxLength(1000);
             entity
                 .HasOne(reviewRun => reviewRun.User)
                 .WithMany(user => user.ReviewRuns)

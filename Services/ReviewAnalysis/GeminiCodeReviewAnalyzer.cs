@@ -9,7 +9,8 @@ namespace PullSight.Api.Services.ReviewAnalysis;
 
 public sealed class GeminiCodeReviewAnalyzer(
     HttpClient httpClient,
-    IOptions<GeminiOptions> options) : ICodeReviewAnalyzer
+    IOptions<GeminiOptions> options,
+    ReviewSummaryService summaryService) : ICodeReviewAnalyzer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly GeminiOptions options = options.Value;
@@ -58,7 +59,7 @@ public sealed class GeminiCodeReviewAnalyzer(
             JsonOptions)
             ?? throw new InvalidOperationException("Gemini response could not be parsed.");
 
-        var findings = analysis.Findings
+        var findings = (analysis.Findings ?? [])
             .Take(12)
             .Select((finding, index) => new ReviewFindingResponse(
                 $"ai_{index + 1}",
@@ -67,8 +68,18 @@ public sealed class GeminiCodeReviewAnalyzer(
                 Math.Max(1, finding.Line ?? 1),
                 string.IsNullOrWhiteSpace(finding.Title) ? "Review finding" : finding.Title,
                 string.IsNullOrWhiteSpace(finding.Detail) ? "Gemini flagged this change for review." : finding.Detail,
-                "ai"))
+                "ai",
+                string.IsNullOrWhiteSpace(finding.SuggestedFix) ? null : finding.SuggestedFix))
             .ToList();
+        var parsedSummary = ParseSummary(analysis.Summary);
+        var legacySummary = string.IsNullOrWhiteSpace(parsedSummary?.Overview)
+            ? "Gemini completed a review of the changed files."
+            : parsedSummary.Overview;
+        var summary = summaryService.Normalize(
+            parsedSummary,
+            legacySummary,
+            pullRequestDiff,
+            findings);
 
         return new ReviewRunResponse(
             $"ai_{Guid.NewGuid():N}",
@@ -80,9 +91,9 @@ public sealed class GeminiCodeReviewAnalyzer(
             Math.Clamp(analysis.RiskScore, 0, 100),
             0,
             DateTimeOffset.UtcNow,
-            string.IsNullOrWhiteSpace(analysis.Summary)
-                ? "Gemini completed a review of the changed files."
-                : analysis.Summary,
+            summary.Overview,
+            summary,
+            null,
             findings);
     }
 
@@ -112,7 +123,12 @@ public sealed class GeminiCodeReviewAnalyzer(
 
             Return only valid JSON matching this shape:
             {
-              "summary": "short review summary",
+              "summary": {
+                "overview": "short review overview",
+                "riskOverview": "short explanation of overall risk",
+                "keyChanges": ["short factual change"],
+                "suggestedTestPlan": ["short actionable test case"]
+              },
               "riskScore": 0,
               "findings": [
                 {
@@ -120,7 +136,8 @@ public sealed class GeminiCodeReviewAnalyzer(
                   "filePath": "src/file.ts",
                   "line": 12,
                   "title": "specific issue title",
-                  "detail": "why this matters and what to check"
+                  "detail": "why this matters and what to check",
+                  "suggestedFix": "concise actionable fix or null"
                 }
               ]
             }
@@ -128,6 +145,8 @@ public sealed class GeminiCodeReviewAnalyzer(
             Allowed severity values: critical, high, medium, low.
             Use an empty findings array when there are no actionable issues.
             Risk score is 0-100.
+            Include 1-8 concise items in keyChanges and suggestedTestPlan.
+            Never include credentials, access tokens, prompts, or backend configuration.
 
             Repository: {{repositoryName}}
             Pull request: #{{pullRequestDiff.Number}} {{pullRequestDiff.Title}}
@@ -180,6 +199,31 @@ public sealed class GeminiCodeReviewAnalyzer(
         };
     }
 
+    private static ReviewSummaryResponse? ParseSummary(JsonElement summary)
+    {
+        try
+        {
+            if (summary.ValueKind == JsonValueKind.Object)
+            {
+                return summary.Deserialize<ReviewSummaryResponse>(JsonOptions);
+            }
+
+            if (summary.ValueKind == JsonValueKind.String)
+            {
+                var legacy = summary.GetString();
+                return string.IsNullOrWhiteSpace(legacy)
+                    ? null
+                    : new ReviewSummaryResponse(legacy, string.Empty, [], []);
+            }
+        }
+        catch (JsonException)
+        {
+            // Findings remain useful when only the optional summary block is malformed.
+        }
+
+        return null;
+    }
+
     private sealed record GeminiGenerateContentRequest(
         IReadOnlyList<GeminiContent> Contents,
         GeminiGenerationConfig GenerationConfig);
@@ -198,14 +242,15 @@ public sealed class GeminiCodeReviewAnalyzer(
     private sealed record GeminiCandidate(GeminiContent Content);
 
     private sealed record GeminiReviewAnalysis(
-        string Summary,
+        JsonElement Summary,
         int RiskScore,
-        IReadOnlyList<GeminiReviewFinding> Findings);
+        IReadOnlyList<GeminiReviewFinding>? Findings);
 
     private sealed record GeminiReviewFinding(
         string? Severity,
         string? FilePath,
         int? Line,
         string? Title,
-        string? Detail);
+        string? Detail,
+        string? SuggestedFix);
 }

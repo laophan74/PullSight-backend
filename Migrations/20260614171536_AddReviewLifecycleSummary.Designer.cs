@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using PullSight.Api.Data;
@@ -11,9 +12,11 @@ using PullSight.Api.Data;
 namespace PullSight.Api.Migrations
 {
     [DbContext(typeof(PullSightDbContext))]
-    partial class PullSightDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260614171536_AddReviewLifecycleSummary")]
+    partial class AddReviewLifecycleSummary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

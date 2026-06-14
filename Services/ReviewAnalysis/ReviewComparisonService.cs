@@ -5,8 +5,15 @@ using PullSight.Api.Data.Entities;
 
 namespace PullSight.Api.Services.ReviewAnalysis;
 
-public sealed class ReviewComparisonService(PullSightDbContext dbContext)
+public sealed class ReviewComparisonService(
+    PullSightDbContext dbContext,
+    ReviewSummaryService summaryService)
 {
+    public ReviewComparisonService(PullSightDbContext dbContext)
+        : this(dbContext, new ReviewSummaryService())
+    {
+    }
+
     public async Task<ReviewComparisonResult> CompareAsync(
         long githubUserId,
         string baseReviewRunId,
@@ -64,11 +71,23 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
                 "Review runs must belong to the same repository and pull request.");
         }
 
-        return ReviewComparisonResult.Success(CompareRuns(baseRun, targetRun));
+        if (!ReviewRunPolicy.IsCompleted(baseRun.Status)
+            || !ReviewRunPolicy.IsCompleted(targetRun.Status))
+        {
+            return ReviewComparisonResult.Invalid(
+                "review_not_completed",
+                "Only completed or fallback review runs can be compared.");
+        }
+
+        return ReviewComparisonResult.Success(CompareRuns(baseRun, targetRun, summaryService));
     }
 
-    internal static ReviewComparisonResponse CompareRuns(ReviewRun baseRun, ReviewRun targetRun)
+    internal static ReviewComparisonResponse CompareRuns(
+        ReviewRun baseRun,
+        ReviewRun targetRun,
+        ReviewSummaryService? summaryService = null)
     {
+        summaryService ??= new ReviewSummaryService();
         var baseGroups = GroupFindings(baseRun.Findings);
         var targetGroups = GroupFindings(targetRun.Findings);
         var added = new List<ReviewFindingResponse>();
@@ -87,8 +106,8 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
         }
 
         return new ReviewComparisonResponse(
-            MapRun(baseRun),
-            MapRun(targetRun),
+            MapRun(baseRun, summaryService),
+            MapRun(targetRun, summaryService),
             SortFindings(added),
             SortFindings(resolved),
             SortFindings(unchanged));
@@ -127,8 +146,11 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
         return Normalize(value).Replace('\\', '/');
     }
 
-    private static ReviewComparisonRunResponse MapRun(ReviewRun run)
+    private static ReviewComparisonRunResponse MapRun(
+        ReviewRun run,
+        ReviewSummaryService summaryService)
     {
+        var legacySummary = run.Summary ?? "Review completed.";
         return new ReviewComparisonRunResponse(
             run.Id.ToString("N"),
             run.Repository!.FullName,
@@ -138,7 +160,9 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
             run.Source,
             run.Analyzer,
             run.RiskScore,
-            run.Summary ?? "Review completed.",
+            legacySummary,
+            summaryService.FromStored(run.SummaryDetailsJson, legacySummary),
+            run.ErrorMessage,
             run.Findings.Count,
             run.CreatedAt);
     }
@@ -152,7 +176,9 @@ public sealed class ReviewComparisonService(PullSightDbContext dbContext)
             finding.LineNumber ?? 1,
             finding.Title,
             finding.Message,
-            finding.RuleId ?? runSource);
+            finding.RuleId ?? runSource,
+            finding.Suggestion,
+            finding.FilePath is not null && finding.LineNumber is > 0);
     }
 
     private static IReadOnlyList<ReviewFindingResponse> SortFindings(

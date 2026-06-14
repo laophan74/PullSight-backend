@@ -34,6 +34,13 @@ public sealed class ReviewReportService(
             return ReviewReportResult.NotFound();
         }
 
+        if (!ReviewRunPolicy.IsCompleted(review.Status))
+        {
+            return ReviewReportResult.Invalid(
+                "review_not_completed",
+                "Only completed or fallback reviews can be exported.");
+        }
+
         var content = parsedFormat == ReviewExportFormat.Json
             ? JsonSerializer.Serialize(review, JsonOptions)
             : BuildReviewMarkdown(review);
@@ -106,9 +113,15 @@ public sealed class ReviewReportService(
             .AppendLine()
             .AppendLine("## Summary")
             .AppendLine()
-            .AppendLine(review.Summary)
+            .AppendLine(review.SummaryDetails.Overview)
+            .AppendLine()
+            .AppendLine("### Risk overview")
+            .AppendLine()
+            .AppendLine(review.SummaryDetails.RiskOverview)
             .AppendLine();
 
+        AppendList(builder, "Key changes", review.SummaryDetails.KeyChanges);
+        AppendList(builder, "Suggested test plan", review.SummaryDetails.SuggestedTestPlan);
         AppendFindingGroups(builder, review.Findings);
         return builder.ToString();
     }
@@ -129,7 +142,7 @@ public sealed class ReviewReportService(
             .AppendLine($"- Risk score: {comparison.BaseRun.RiskScore}")
             .AppendLine($"- Created: {comparison.BaseRun.CreatedAt:O}")
             .AppendLine()
-            .AppendLine(comparison.BaseRun.Summary)
+            .AppendLine(comparison.BaseRun.SummaryDetails.Overview)
             .AppendLine()
             .AppendLine("## Target")
             .AppendLine()
@@ -139,7 +152,7 @@ public sealed class ReviewReportService(
             .AppendLine($"- Risk score: {comparison.TargetRun.RiskScore}")
             .AppendLine($"- Created: {comparison.TargetRun.CreatedAt:O}")
             .AppendLine()
-            .AppendLine(comparison.TargetRun.Summary)
+            .AppendLine(comparison.TargetRun.SummaryDetails.Overview)
             .AppendLine();
 
         AppendComparisonGroup(builder, "Added", comparison.Added);
@@ -155,11 +168,14 @@ public sealed class ReviewReportService(
             .AppendLine()
             .AppendLine($"**Risk:** {review.RiskScore} | **Analyzer:** {review.Analyzer} | **Head:** `{ShortSha(review.HeadSha)}`")
             .AppendLine()
-            .AppendLine(review.Summary)
+            .AppendLine(review.SummaryDetails.Overview)
+            .AppendLine()
+            .AppendLine($"**Risk overview:** {review.SummaryDetails.RiskOverview}")
             .AppendLine()
             .AppendLine($"**Findings:** {review.Findings.Count} total ({BuildSeverityCounts(review.Findings)})");
 
         AppendImportantFindings(builder, review.Findings);
+        AppendCompactTestPlan(builder, review.SummaryDetails.SuggestedTestPlan);
         builder.AppendLine().Append(marker);
         return builder.ToString();
     }
@@ -247,6 +263,36 @@ public sealed class ReviewReportService(
         foreach (var finding in important)
         {
             builder.AppendLine($"- **{finding.Severity.ToUpperInvariant()}** `{finding.FilePath}:{finding.Line}` {finding.Title}");
+        }
+    }
+
+    private static void AppendList(
+        StringBuilder builder,
+        string title,
+        IReadOnlyList<string> items)
+    {
+        builder.AppendLine($"### {title}").AppendLine();
+        foreach (var item in items)
+        {
+            builder.AppendLine($"- {item}");
+        }
+
+        builder.AppendLine();
+    }
+
+    private static void AppendCompactTestPlan(
+        StringBuilder builder,
+        IReadOnlyList<string> items)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine().AppendLine("### Suggested test plan");
+        foreach (var item in items.Take(8))
+        {
+            builder.AppendLine($"- {item}");
         }
     }
 
