@@ -93,7 +93,9 @@ public sealed class GitHubCheckService(HttpClient httpClient)
 
             if (!publishResponse.IsSuccessStatusCode)
             {
-                return GitHubCheckResult.Failed();
+                return publishResponse.StatusCode == HttpStatusCode.Forbidden
+                    ? GitHubCheckResult.RequiresGitHubApp()
+                    : GitHubCheckResult.Failed();
             }
 
             var published = await publishResponse.Content.ReadFromJsonAsync<GitHubCheckRun>(
@@ -161,7 +163,15 @@ public sealed record GitHubCheckResult(
     public static GitHubCheckResult RepositoryUnavailable() =>
         new(false, null, null, null, "github_repository_unavailable", "The GitHub repository or commit is unavailable.");
 
+    public static GitHubCheckResult RequiresGitHubApp() =>
+        new(
+            false,
+            null,
+            null,
+            null,
+            "github_check_requires_app",
+            "GitHub Check Runs require a GitHub App installation with Checks: write permission. The current OAuth login token cannot create Check Runs.");
+
     public static GitHubCheckResult Failed() =>
         new(false, null, null, null, "github_check_failed", "GitHub could not create or update the PullSight check run.");
 }
-

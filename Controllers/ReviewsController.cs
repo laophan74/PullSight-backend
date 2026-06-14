@@ -455,6 +455,7 @@ public sealed class ReviewsController(
             "review_not_completed" or "review_head_outdated" => StatusCodes.Status409Conflict,
             "github_token_missing" => StatusCodes.Status401Unauthorized,
             "github_repository_unavailable" => StatusCodes.Status404NotFound,
+            "github_check_requires_app" => StatusCodes.Status409Conflict,
             "github_check_failed" or "github_inline_comment_failed" => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status400BadRequest,
         };

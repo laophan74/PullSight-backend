@@ -105,6 +105,8 @@ The summary contract contains `overview`, `riskOverview`, `keyChanges`, and `sug
 
 Check Runs use `external_id = pullsight:{reviewRunId}` and update a matching run. Conclusions are `failure` for critical/high findings, `neutral` for medium findings, and `success` otherwise. Annotations are limited to valid changed lines and GitHub's 50-annotation request limit.
 
+Important: GitHub restricts Check Run writes to GitHub Apps with repository `Checks: write`. The existing OAuth App login token can read checks but cannot create them. Until GitHub App installation authentication is added, this endpoint returns `github_check_requires_app` with a clear setup message.
+
 Inline comments validate the current PR head and added right-side diff lines. Markers use `<!-- pullsight-inline:{reviewRunId}:{stableFindingIdentity} -->`; publishing returns created, updated, already-published, skipped, and failed counts.
 
 Production health check:

@@ -111,6 +111,28 @@ public sealed class GitHubPublishingTests
     }
 
     [Fact]
+    public async Task CheckService_MapsOAuthPermissionFailure()
+    {
+        var handler = new QueueHandler(
+            Json(HttpStatusCode.OK, """{"check_runs":[]}"""),
+            Json(HttpStatusCode.Forbidden, """{"message":"Resource not accessible by integration"}"""));
+
+        var result = await new GitHubCheckService(new HttpClient(handler)).UpsertAsync(
+            "owner/repo",
+            "abcdef",
+            "pullsight:abc",
+            "success",
+            "Title",
+            "Summary",
+            [],
+            "oauth-token",
+            CancellationToken.None);
+
+        Assert.Equal("github_check_requires_app", result.ErrorCode);
+        Assert.Contains("GitHub App", result.ErrorMessage);
+    }
+
+    [Fact]
     public async Task InlineService_UpdatesMatchingMarkerAndPreventsDuplicate()
     {
         const string marker = "<!-- pullsight-inline:run:identity -->";
